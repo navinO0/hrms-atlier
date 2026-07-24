@@ -53,6 +53,7 @@ interface TimesheetEntry {
   description: string;
   hours: number;
   image?: string;
+  images?: string[];
 }
 
 interface Timesheet {
@@ -180,10 +181,21 @@ export default function Home() {
   ]);
   const [submitSuccessMsg, setSubmitSuccessMsg] = useState<string>("");
 
+  // Admin employee details management states
+  const [selectedAdminEmp, setSelectedAdminEmp] = useState<Employee | null>(null);
+  const [adminTimesheetDate, setAdminTimesheetDate] = useState<string>("");
+  const [adminTimesheetEntries, setAdminTimesheetEntries] = useState<Omit<TimesheetEntry, "id">[]>([
+    { orderId: "ord-1", description: "", hours: 4 }
+  ]);
+  const [manualCheckIn, setManualCheckIn] = useState<string>("");
+  const [manualCheckOut, setManualCheckOut] = useState<string>("");
+
   // Set mounted state and load from local storage
   useEffect(() => {
     setMounted(true);
-    setTimesheetDate(new Date().toISOString().split("T")[0]);
+    const todayStr = new Date().toISOString().split("T")[0];
+    setTimesheetDate(todayStr);
+    setAdminTimesheetDate(todayStr);
 
     const savedAsg = localStorage.getItem("hrms_v1_assignments");
     const savedAtt = localStorage.getItem("hrms_v1_attendance");
@@ -310,21 +322,25 @@ export default function Home() {
     }
   };
 
-  // Employee: Clock-in / Clock-out
-  const handleClockIn = () => {
+  // Employee: Clock-in / Clock-out (or Admin on behalf of employee)
+  const handleClockIn = (empId?: string) => {
+    const targetEmpId = empId || activeEmpId;
     const todayStr = new Date().toISOString().split("T")[0];
-    const log = attendance.find(a => a.employeeId === activeEmpId && a.date === todayStr);
+    const log = attendance.find(a => a.employeeId === targetEmpId && a.date === todayStr);
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     if (!log) {
       const newLog: AttendanceLog = {
         id: `att-${Date.now()}`,
-        employeeId: activeEmpId,
+        employeeId: targetEmpId,
         date: todayStr,
         checkIn: timeStr,
         status: "Clocked In"
       };
       saveAttendance([...attendance, newLog]);
+      if (empId) {
+        setManualCheckIn(timeStr);
+      }
     } else {
       const updated = attendance.map(a => 
         a.id === log.id 
@@ -332,23 +348,31 @@ export default function Home() {
           : a
       );
       saveAttendance(updated);
+      if (empId) {
+        setManualCheckIn(timeStr);
+        setManualCheckOut("");
+      }
     }
   };
 
-  const handleClockOut = () => {
+  const handleClockOut = (empId?: string) => {
+    const targetEmpId = empId || activeEmpId;
     const todayStr = new Date().toISOString().split("T")[0];
-    const log = attendance.find(a => a.employeeId === activeEmpId && a.date === todayStr);
+    const log = attendance.find(a => a.employeeId === targetEmpId && a.date === todayStr);
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     if (!log) {
       const newLog: AttendanceLog = {
         id: `att-${Date.now()}`,
-        employeeId: activeEmpId,
+        employeeId: targetEmpId,
         date: todayStr,
         checkOut: timeStr,
         status: "Clocked Out"
       };
       saveAttendance([...attendance, newLog]);
+      if (empId) {
+        setManualCheckOut(timeStr);
+      }
     } else {
       const updated = attendance.map(a => 
         a.id === log.id 
@@ -356,7 +380,57 @@ export default function Home() {
           : a
       );
       saveAttendance(updated);
+      if (empId) {
+        setManualCheckOut(timeStr);
+      }
     }
+  };
+
+  // Admin select employee details
+  const handleSelectAdminEmp = (emp: Employee) => {
+    setSelectedAdminEmp(emp);
+    const todayStr = new Date().toISOString().split("T")[0];
+    const log = attendance.find(a => a.employeeId === emp.id && a.date === todayStr);
+    setManualCheckIn(log?.checkIn || "");
+    setManualCheckOut(log?.checkOut || "");
+    setAdminTimesheetDate(todayStr);
+    setAdminTimesheetEntries([{ orderId: "ord-1", description: "", hours: 4 }]);
+  };
+
+  // Admin save manual attendance corrections
+  const handleSaveManualAttendance = (empId: string) => {
+    const todayStr = new Date().toISOString().split("T")[0];
+    const log = attendance.find(a => a.employeeId === empId && a.date === todayStr);
+
+    let status: "Clocked In" | "Clocked Out" = "Clocked In";
+    if (manualCheckOut.trim()) {
+      status = "Clocked Out";
+    }
+
+    if (!log) {
+      const newLog: AttendanceLog = {
+        id: `att-${Date.now()}`,
+        employeeId: empId,
+        date: todayStr,
+        checkIn: manualCheckIn || undefined,
+        checkOut: manualCheckOut || undefined,
+        status: status
+      };
+      saveAttendance([...attendance, newLog]);
+    } else {
+      const updated = attendance.map(a => 
+        a.id === log.id 
+          ? { 
+              ...a, 
+              checkIn: manualCheckIn || undefined, 
+              checkOut: manualCheckOut || undefined, 
+              status: status 
+            }
+          : a
+      );
+      saveAttendance(updated);
+    }
+    alert("Attendance record updated successfully!");
   };
 
   // Employee: Add Row to Timesheet
@@ -388,6 +462,7 @@ export default function Home() {
       entries: timesheetEntries.map((t, idx) => ({ 
         ...t, 
         hours: Number(t.hours),
+        images: t.images || (t.image ? [t.image] : []),
         id: `tse-${Date.now()}-${idx}` 
       })),
       submittedAt: new Date().toLocaleDateString() + " " + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -397,6 +472,47 @@ export default function Home() {
     setTimesheetEntries([{ orderId: "ord-1", description: "", hours: 4 }]);
     setSubmitSuccessMsg("Timesheet submitted successfully to Admin records!");
     setTimeout(() => setSubmitSuccessMsg(""), 4000);
+  };
+
+  // Admin: Add Row to Timesheet
+  const handleAddAdminTimesheetRow = () => {
+    setAdminTimesheetEntries([...adminTimesheetEntries, { orderId: "ord-1", description: "", hours: 1 }]);
+  };
+
+  // Admin: Remove Row
+  const handleRemoveAdminTimesheetRow = (idx: number) => {
+    if (adminTimesheetEntries.length === 1) return;
+    setAdminTimesheetEntries(adminTimesheetEntries.filter((_, i) => i !== idx));
+  };
+
+  // Admin: Submit Timesheet on behalf of selected employee
+  const handleAdminTimesheetSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedAdminEmp) return;
+
+    // Validate entries
+    const invalid = adminTimesheetEntries.some(t => !t.description.trim() || isNaN(Number(t.hours)) || Number(t.hours) <= 0);
+    if (invalid) {
+      alert("Please ensure all rows have work descriptions and positive hour counts.");
+      return;
+    }
+
+    const newTs: Timesheet = {
+      id: `ts-${Date.now()}`,
+      employeeId: selectedAdminEmp.id,
+      date: adminTimesheetDate,
+      entries: adminTimesheetEntries.map((t, idx) => ({ 
+        ...t, 
+        hours: Number(t.hours),
+        images: t.images || (t.image ? [t.image] : []),
+        id: `tse-${Date.now()}-${idx}` 
+      })),
+      submittedAt: new Date().toLocaleDateString() + " " + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    saveTimesheets([...timesheets, newTs]);
+    setAdminTimesheetEntries([{ orderId: "ord-1", description: "", hours: 4 }]);
+    alert(`Timesheet logged successfully for ${selectedAdminEmp.name}!`);
   };
 
   // Pre-hydration load guard
@@ -660,8 +776,9 @@ export default function Home() {
             {/* Admin TAB: Attendance Logs */}
             {adminTab === "status" && (
               <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden shadow-sm text-left animate-in fade-in duration-150">
-                <div className="p-3 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/20">
+                <div className="flex justify-between items-center p-3 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/20">
                   <span className="font-bold text-[10px] text-zinc-500 uppercase tracking-wider">Today's Punch logs</span>
+                  <span className="text-[9px] text-amber-500 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded animate-pulse">Click row to manage employee</span>
                 </div>
                 <div className="overflow-x-auto text-[11px]">
                   <table className="w-full text-left border-collapse">
@@ -679,7 +796,12 @@ export default function Home() {
                         const todayStr = new Date().toISOString().split("T")[0];
                         const log = attendance.find(a => a.employeeId === emp.id && a.date === todayStr);
                         return (
-                          <tr key={emp.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-850/10">
+                          <tr 
+                            key={emp.id} 
+                            onClick={() => handleSelectAdminEmp(emp)}
+                            className="hover:bg-zinc-150/40 dark:hover:bg-zinc-800/40 cursor-pointer transition-colors"
+                            title="Click to manage employee clocking & work logs"
+                          >
                             <td className="p-2">
                               <p className="font-bold text-zinc-900 dark:text-zinc-100">{emp.name}</p>
                               <p className="text-[9px] text-zinc-450 font-mono">{emp.code}</p>
@@ -746,14 +868,17 @@ export default function Home() {
                               return (
                                 <div key={entry.id || idx} className="flex justify-between items-start gap-3 text-[11px]">
                                   <div className="flex gap-2.5 items-start">
-                                    {entry.image && (
-                                      <img 
-                                        src={entry.image} 
-                                        alt="Work proof" 
-                                        className="h-8 w-8 object-cover rounded border border-zinc-200 dark:border-zinc-800 cursor-pointer hover:opacity-80 shrink-0"
-                                        onClick={() => setPreviewImageUrl(entry.image || null)}
-                                      />
-                                    )}
+                                    <div className="flex flex-wrap gap-1 shrink-0">
+                                      {(entry.images || (entry.image ? [entry.image] : [])).map((imgUrl, imgIdx) => (
+                                        <img 
+                                          key={imgIdx}
+                                          src={imgUrl} 
+                                          alt="Work proof" 
+                                          className="h-8 w-8 object-cover rounded border border-zinc-200 dark:border-zinc-800 cursor-pointer hover:opacity-80 shrink-0"
+                                          onClick={() => setPreviewImageUrl(imgUrl)}
+                                        />
+                                      ))}
+                                    </div>
                                     <div className="space-y-0.5 text-left">
                                       <span className="font-bold text-amber-500 font-mono mr-1">{ord?.orderNumber}</span>
                                       <span className="text-zinc-600 dark:text-zinc-400 font-medium leading-relaxed">{entry.description}</span>
@@ -832,10 +957,11 @@ export default function Home() {
                 {/* Right lists column */}
                 <div className="lg:col-span-2 space-y-4">
                   
-                  {/* Workforce Directory */}
+                   {/* Workforce Directory */}
                   <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden shadow-sm">
-                    <div className="p-3 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/20">
+                    <div className="flex justify-between items-center p-3 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/20">
                       <span className="font-bold text-[10px] text-zinc-500 uppercase tracking-wider">Employee roster Directory</span>
+                      <span className="text-[9px] text-amber-500 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded animate-pulse">Click row to manage employee</span>
                     </div>
                     <div className="overflow-x-auto text-[11px]">
                       <table className="w-full text-left border-collapse">
@@ -849,7 +975,12 @@ export default function Home() {
                         </thead>
                         <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800 font-medium">
                           {employees.map(emp => (
-                            <tr key={emp.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-850/10">
+                            <tr 
+                              key={emp.id} 
+                              onClick={() => handleSelectAdminEmp(emp)}
+                              className="hover:bg-zinc-150/40 dark:hover:bg-zinc-800/40 cursor-pointer transition-colors"
+                              title="Click to manage employee clocking & work logs"
+                            >
                               <td className="p-2.5 font-bold text-zinc-900 dark:text-zinc-150">{emp.name}</td>
                               <td className="p-2.5 font-mono text-zinc-550">{emp.code}</td>
                               <td className="p-2.5 text-zinc-550">{emp.department}</td>
@@ -941,14 +1072,14 @@ export default function Home() {
                 <div className="flex w-full sm:w-auto shrink-0">
                   {employeeClockState?.status === "Clocked In" ? (
                     <button
-                      onClick={handleClockOut}
+                      onClick={() => handleClockOut()}
                       className="w-full sm:w-44 py-2.5 bg-red-600 hover:bg-red-750 text-white font-bold rounded cursor-pointer transition-colors uppercase tracking-wider text-[10px] text-center select-none"
                     >
                       Clock Out
                     </button>
                   ) : (
                     <button
-                      onClick={handleClockIn}
+                      onClick={() => handleClockIn()}
                       className="w-full sm:w-44 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded cursor-pointer transition-colors uppercase tracking-wider text-[10px] text-center select-none"
                     >
                       Clock In
@@ -1104,43 +1235,66 @@ export default function Home() {
                             />
                           </div>
 
-                          {/* Proof Photo */}
+                          {/* Proof Photos */}
                           <div className="w-full sm:w-auto text-left space-y-1">
-                            <label className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 block">Proof Photo</label>
-                            {row.image ? (
-                              <div className="flex items-center gap-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-1 rounded h-8 text-xs font-semibold">
-                                <img src={row.image} alt="Thumb" className="h-6 w-6 object-cover rounded cursor-pointer" onClick={() => setPreviewImageUrl(row.image || null)} />
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const copy = [...timesheetEntries];
-                                    delete copy[idx].image;
-                                    setTimesheetEntries(copy);
-                                  }}
-                                  className="text-[9px] text-red-500 hover:underline px-1 font-bold cursor-pointer"
-                                >
-                                  Clear
-                                </button>
-                              </div>
-                            ) : (
+                            <label className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 block">Proof Photos</label>
+                            <div className="flex flex-wrap gap-1.5 items-center">
+                              {/* Display all existing/new images */}
+                              {(row.images || (row.image ? [row.image] : [])).map((imgUrl, imgIdx) => (
+                                <div key={imgIdx} className="flex items-center gap-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-1 rounded h-8 text-xs font-semibold">
+                                  <img 
+                                    src={imgUrl} 
+                                    alt="Thumb" 
+                                    className="h-6 w-6 object-cover rounded cursor-pointer" 
+                                    onClick={() => setPreviewImageUrl(imgUrl)} 
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const copy = [...timesheetEntries];
+                                      const currentList = copy[idx].images || (copy[idx].image ? [copy[idx].image!] : []);
+                                      const updatedList = currentList.filter((_, i) => i !== imgIdx);
+                                      copy[idx] = { 
+                                        ...copy[idx], 
+                                        images: updatedList,
+                                        image: undefined 
+                                      };
+                                      setTimesheetEntries(copy);
+                                    }}
+                                    className="text-[12px] text-red-500 hover:text-red-750 px-1 font-bold cursor-pointer font-sans"
+                                  >
+                                    &times;
+                                  </button>
+                                </div>
+                              ))}
+
+                              {/* Button to add/append images */}
                               <div className="relative h-8 w-24 bg-white border border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 rounded flex items-center justify-center cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-850">
                                 <input
                                   type="file"
                                   accept="image/*"
+                                  multiple
                                   onChange={async e => {
-                                    const file = e.target.files?.[0] || null;
-                                    if (file) {
-                                      const compressed = await compressImage(file);
+                                    const files = Array.from(e.target.files || []);
+                                    if (files.length > 0) {
+                                      const compressedList = await Promise.all(
+                                        files.map(file => compressImage(file))
+                                      );
                                       const copy = [...timesheetEntries];
-                                      copy[idx] = { ...copy[idx], image: compressed };
+                                      const existingImages = copy[idx].images || (copy[idx].image ? [copy[idx].image!] : []);
+                                      copy[idx] = { 
+                                        ...copy[idx], 
+                                        images: [...existingImages, ...compressedList],
+                                        image: undefined 
+                                      };
                                       setTimesheetEntries(copy);
                                     }
                                   }}
                                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                                 />
-                                <span className="text-[10px] font-bold text-zinc-400">Add Photo</span>
+                                <span className="text-[10px] font-bold text-zinc-400">+ Add Photos</span>
                               </div>
-                            )}
+                            </div>
                           </div>
 
                           {/* Remove button */}
@@ -1190,6 +1344,414 @@ export default function Home() {
         )}
 
       </main>
+
+      {/* Admin: Employee Management Console Modal */}
+      {selectedAdminEmp && (
+        <div 
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150 animate-out duration-100"
+          onClick={() => setSelectedAdminEmp(null)}
+        >
+          <div 
+            className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto flex flex-col relative text-left shadow-xl animate-in zoom-in-95 duration-150" 
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex justify-between items-center p-4 border-b border-zinc-150 dark:border-zinc-850">
+              <div>
+                <h3 className="font-bold text-sm text-zinc-900 dark:text-zinc-50 uppercase tracking-wider">
+                  Employee Console: {selectedAdminEmp.name}
+                </h3>
+                <p className="text-[10px] text-zinc-400 font-bold mt-0.5 uppercase tracking-wider">
+                  {selectedAdminEmp.code} &bull; {selectedAdminEmp.designation} &bull; {selectedAdminEmp.department}
+                </p>
+              </div>
+              <button 
+                onClick={() => setSelectedAdminEmp(null)}
+                className="px-2.5 py-1 text-xs font-bold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-250 border border-zinc-200 dark:border-zinc-800 rounded cursor-pointer transition-colors"
+              >
+                Close
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 space-y-6">
+              
+              {/* Row 1: Attendance punch status & edit */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                
+                {/* Attendance Summary */}
+                <div className="bg-zinc-50 dark:bg-zinc-950 p-4 border border-zinc-200 dark:border-zinc-850 rounded-lg space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider">Today's Attendance</span>
+                    {/* Status badge */}
+                    {(() => {
+                      const todayStr = new Date().toISOString().split("T")[0];
+                      const log = attendance.find(a => a.employeeId === selectedAdminEmp.id && a.date === todayStr);
+                      return (
+                        <span className={`inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded border ${
+                          log?.status === "Clocked In"
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-255 dark:bg-emerald-950/10 dark:text-emerald-455 dark:border-emerald-900/40"
+                            : "bg-red-50 text-red-750 border-red-255 dark:bg-red-950/10 dark:text-red-400 dark:border-red-900/30"
+                        }`}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${log?.status === "Clocked In" ? "bg-emerald-500 animate-pulse" : "bg-red-500"}`}></span>
+                          {log?.status === "Clocked In" ? "Active" : log?.status === "Clocked Out" ? "Offline" : "Absent"}
+                        </span>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Punch logs status */}
+                  {(() => {
+                    const todayStr = new Date().toISOString().split("T")[0];
+                    const log = attendance.find(a => a.employeeId === selectedAdminEmp.id && a.date === todayStr);
+                    return (
+                      <div className="space-y-1.5 py-1">
+                        <p className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                          Punch In: <span className="font-mono text-zinc-900 dark:text-zinc-100">{log?.checkIn || "—"}</span>
+                        </p>
+                        <p className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                          Punch Out: <span className="font-mono text-zinc-900 dark:text-zinc-100">{log?.checkOut || "—"}</span>
+                        </p>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Punch Buttons */}
+                  <div className="flex gap-2 pt-2 border-t border-zinc-200 dark:border-zinc-800">
+                    <button
+                      onClick={() => handleClockIn(selectedAdminEmp.id)}
+                      className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded cursor-pointer transition-colors text-[10px] uppercase tracking-wider text-center"
+                    >
+                      Punch In (Now)
+                    </button>
+                    <button
+                      onClick={() => handleClockOut(selectedAdminEmp.id)}
+                      className="flex-1 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded cursor-pointer transition-colors text-[10px] uppercase tracking-wider text-center"
+                    >
+                      Punch Out (Now)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Attendance Corrections Form */}
+                <div className="bg-zinc-50 dark:bg-zinc-950 p-4 border border-zinc-200 dark:border-zinc-855 rounded-lg space-y-3">
+                  <span className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider block">Manual Attendance Adjustment</span>
+                  
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="space-y-1">
+                      <label className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Check In Time</label>
+                      <input
+                        placeholder="E.g. 09:05 AM"
+                        value={manualCheckIn}
+                        onChange={e => setManualCheckIn(e.target.value)}
+                        className="w-full h-8 bg-white border border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 rounded px-2.5 focus:outline-none font-semibold font-mono text-zinc-800 dark:text-zinc-200"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Check Out Time</label>
+                      <input
+                        placeholder="E.g. 05:15 PM"
+                        value={manualCheckOut}
+                        onChange={e => setManualCheckOut(e.target.value)}
+                        className="w-full h-8 bg-white border border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 rounded px-2.5 focus:outline-none font-semibold font-mono text-zinc-800 dark:text-zinc-200"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => handleSaveManualAttendance(selectedAdminEmp.id)}
+                    className="w-full py-1.5 bg-zinc-900 hover:bg-zinc-850 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-bold rounded cursor-pointer transition-colors text-[10px] uppercase tracking-wider text-center"
+                  >
+                    Save Attendance Times
+                  </button>
+                </div>
+
+              </div>
+
+              {/* Row 2: Assigned Orders */}
+              <div className="bg-zinc-50 dark:bg-zinc-950 p-4 border border-zinc-200 dark:border-zinc-850 rounded-lg space-y-3">
+                <span className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider block">Active Order Assignments</span>
+                
+                {(() => {
+                  const empAsg = assignments.filter(a => a.employeeId === selectedAdminEmp.id);
+                  return (
+                    <div className="space-y-2">
+                      {empAsg.length === 0 ? (
+                        <p className="text-zinc-400 italic text-[11px] py-1">No orders currently assigned.</p>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          {empAsg.map(asg => {
+                            const ord = orders.find(o => o.id === asg.orderId);
+                            return (
+                              <div key={asg.id} className="flex justify-between items-center bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-805 p-2 rounded">
+                                <div>
+                                  <span className="font-bold text-amber-500 font-mono">{ord?.orderNumber}</span>
+                                  <p className="font-bold text-zinc-800 dark:text-zinc-300 truncate max-w-[200px]">{ord?.productName}</p>
+                                </div>
+                                <button
+                                  onClick={() => handleRemoveAssignment(asg.id)}
+                                  className="text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 p-1.5 rounded transition-colors"
+                                  title="Unassign order"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Row 3: Admin Log Work */}
+              <div className="bg-zinc-50 dark:bg-zinc-950 p-4 border border-zinc-200 dark:border-zinc-850 rounded-lg space-y-4">
+                <div>
+                  <span className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider block">Log Work on behalf of Employee</span>
+                  <p className="text-[9px] text-zinc-400">Fill in the employee timesheet directly here.</p>
+                </div>
+
+                <form onSubmit={handleAdminTimesheetSubmit} className="space-y-3 text-xs">
+                  
+                  {/* Date select */}
+                  <div className="max-w-[150px] space-y-1">
+                    <label className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Date</label>
+                    <input
+                      type="date"
+                      value={adminTimesheetDate}
+                      onChange={e => setAdminTimesheetDate(e.target.value)}
+                      className="w-full h-8 bg-white border border-zinc-200 dark:bg-zinc-900 dark:border-zinc-800 rounded px-2 focus:outline-none font-bold"
+                    />
+                  </div>
+
+                  {/* Entries */}
+                  <div className="space-y-2">
+                    {adminTimesheetEntries.map((row, idx) => (
+                      <div key={idx} className="flex flex-col sm:flex-row gap-2.5 items-end sm:items-center bg-white dark:bg-zinc-900 p-3 rounded-lg border border-zinc-200 dark:border-zinc-800 relative">
+                        
+                        {/* Order Select */}
+                        <div className="w-full sm:w-1/3 text-left space-y-1">
+                          <label className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Order</label>
+                          <select
+                            value={row.orderId}
+                            onChange={e => {
+                              const copy = [...adminTimesheetEntries];
+                              copy[idx].orderId = e.target.value;
+                              setAdminTimesheetEntries(copy);
+                            }}
+                            className="w-full h-8 bg-zinc-50 dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 rounded px-1.5 text-xs font-semibold focus:outline-none focus:border-zinc-400 text-zinc-800 dark:text-zinc-200 cursor-pointer"
+                          >
+                            {orders.map(o => {
+                              const isAssigned = assignments.filter(a => a.employeeId === selectedAdminEmp.id).some(a => a.orderId === o.id);
+                              return (
+                                <option key={o.id} value={o.id}>
+                                  {o.orderNumber} {isAssigned ? "(Assigned)" : ""} &mdash; {o.productName}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+
+                        {/* Hours */}
+                        <div className="w-full sm:w-16 text-left space-y-1">
+                          <label className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Hours</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="Hours"
+                            value={row.hours}
+                            onChange={e => {
+                              const val = e.target.value;
+                              if (val === "" || /^[0-9]*\.?[0-9]*$/.test(val)) {
+                                const copy = [...adminTimesheetEntries];
+                                copy[idx].hours = val as any;
+                                setAdminTimesheetEntries(copy);
+                              }
+                            }}
+                            className="w-full h-8 bg-zinc-50 dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 rounded px-1 text-xs text-center focus:outline-none focus:border-zinc-400 text-zinc-800 dark:text-zinc-200 font-bold"
+                          />
+                        </div>
+
+                        {/* Description */}
+                        <div className="flex-1 w-full text-left space-y-1">
+                          <label className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Work Description</label>
+                          <input
+                            required
+                            placeholder="E.g. Stitched sleeves..."
+                            value={row.description}
+                            onChange={e => {
+                              const copy = [...adminTimesheetEntries];
+                              copy[idx].description = e.target.value;
+                              setAdminTimesheetEntries(copy);
+                            }}
+                            className="w-full h-8 bg-zinc-50 dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-800 rounded px-2 text-xs focus:outline-none focus:border-zinc-400 font-semibold text-zinc-800 dark:text-zinc-250"
+                          />
+                        </div>
+
+                        {/* Proof Photos */}
+                        <div className="w-full sm:w-auto text-left space-y-1">
+                          <label className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 block">Proof Photos</label>
+                          <div className="flex flex-wrap gap-1.5 items-center">
+                            {(row.images || (row.image ? [row.image] : [])).map((imgUrl, imgIdx) => (
+                              <div key={imgIdx} className="flex items-center gap-1 bg-zinc-50 dark:bg-zinc-950 border border-zinc-205 dark:border-zinc-800 p-1 rounded h-8 text-xs font-semibold">
+                                <img 
+                                  src={imgUrl} 
+                                  alt="Thumb" 
+                                  className="h-6 w-6 object-cover rounded cursor-pointer" 
+                                  onClick={() => setPreviewImageUrl(imgUrl)} 
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const copy = [...adminTimesheetEntries];
+                                    const currentList = copy[idx].images || (copy[idx].image ? [copy[idx].image!] : []);
+                                    const updatedList = currentList.filter((_, i) => i !== imgIdx);
+                                    copy[idx] = { 
+                                      ...copy[idx], 
+                                      images: updatedList,
+                                      image: undefined 
+                                    };
+                                    setAdminTimesheetEntries(copy);
+                                  }}
+                                  className="text-[12px] text-red-500 hover:text-red-750 px-1 font-bold cursor-pointer font-sans"
+                                >
+                                  &times;
+                                </button>
+                              </div>
+                            ))}
+
+                            {/* Button to add photos */}
+                            <div className="relative h-8 w-24 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded flex items-center justify-center cursor-pointer hover:bg-zinc-150 dark:hover:bg-zinc-800">
+                              <input
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                onChange={async e => {
+                                  const files = Array.from(e.target.files || []);
+                                  if (files.length > 0) {
+                                    const compressedList = await Promise.all(
+                                      files.map(file => compressImage(file))
+                                    );
+                                    const copy = [...adminTimesheetEntries];
+                                    const existingImages = copy[idx].images || (copy[idx].image ? [copy[idx].image!] : []);
+                                    copy[idx] = { 
+                                      ...copy[idx], 
+                                      images: [...existingImages, ...compressedList],
+                                      image: undefined 
+                                    };
+                                    setAdminTimesheetEntries(copy);
+                                  }
+                                }}
+                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                              />
+                              <span className="text-[10px] font-bold text-zinc-400">+ Add Photos</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Remove line */}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAdminTimesheetRow(idx)}
+                          disabled={adminTimesheetEntries.length === 1}
+                          className="absolute top-2 right-2 sm:relative sm:top-auto sm:right-auto sm:mt-4 p-1 hover:bg-red-50 text-red-500 dark:hover:bg-red-950/20 rounded cursor-pointer disabled:opacity-30 shrink-0"
+                          title="Delete row"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Actions row */}
+                  <div className="flex flex-col sm:flex-row justify-between items-center gap-3 pt-3 border-t border-zinc-200 dark:border-zinc-800">
+                    <button
+                      type="button"
+                      onClick={handleAddAdminTimesheetRow}
+                      className="w-full sm:w-auto px-3 py-1.5 border border-zinc-200 hover:border-zinc-300 dark:border-zinc-850 text-zinc-700 dark:text-zinc-300 font-bold rounded flex items-center justify-center gap-1 h-8 cursor-pointer transition-colors text-xs"
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Add Entry Line
+                    </button>
+
+                    <div className="flex items-center gap-3 shrink-0 w-full sm:w-auto justify-between sm:justify-end">
+                      <span className="font-extrabold text-[10px] text-zinc-450 dark:text-zinc-550 uppercase tracking-wider">
+                        Total: <strong className="text-amber-500 text-xs font-mono font-black">{adminTimesheetEntries.reduce((sum, e) => sum + e.hours, 0)}</strong> hrs
+                      </span>
+                      
+                      <button
+                        type="submit"
+                        className="px-4 py-1.5 bg-zinc-900 hover:bg-zinc-850 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-bold rounded text-xs cursor-pointer shadow-sm shadow-zinc-500/10 h-8 uppercase tracking-wider"
+                      >
+                        Submit Log for Employee
+                      </button>
+                    </div>
+                  </div>
+
+                </form>
+              </div>
+
+              {/* Row 4: Timesheet History */}
+              <div className="bg-zinc-50 dark:bg-zinc-955 p-4 border border-zinc-200 dark:border-zinc-850 rounded-lg space-y-3">
+                <span className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider block">Timesheet History Ledger</span>
+                
+                {(() => {
+                  const empTs = timesheets.filter(t => t.employeeId === selectedAdminEmp.id);
+                  if (empTs.length === 0) {
+                    return <p className="text-zinc-400 italic text-[11px] py-1">No timesheets submitted yet for this employee.</p>;
+                  }
+                  return (
+                    <div className="divide-y divide-zinc-200 dark:divide-zinc-800 text-xs font-semibold">
+                      {empTs.map(ts => {
+                        const totalHours = ts.entries.reduce((sum, e) => sum + e.hours, 0);
+                        return (
+                          <div key={ts.id} className="py-3 space-y-2">
+                            <div className="flex justify-between items-center text-[10px] uppercase font-bold text-zinc-450">
+                              <span>Date: {ts.date}</span>
+                              <span>Total: {totalHours} Hrs (Sub: {ts.submittedAt})</span>
+                            </div>
+                            
+                            <div className="space-y-1.5 pl-2 border-l border-amber-500/30">
+                              {ts.entries.map((entry, idx) => {
+                                const ord = orders.find(o => o.id === entry.orderId);
+                                return (
+                                  <div key={entry.id || idx} className="flex justify-between items-start gap-3">
+                                    <div className="flex gap-2 items-start">
+                                      <div className="flex flex-wrap gap-1 shrink-0">
+                                        {(entry.images || (entry.image ? [entry.image] : [])).map((imgUrl, imgIdx) => (
+                                          <img 
+                                            key={imgIdx}
+                                            src={imgUrl} 
+                                            alt="Work proof" 
+                                            className="h-7 w-7 object-cover rounded border border-zinc-200 dark:border-zinc-800 cursor-pointer hover:opacity-80 shrink-0"
+                                            onClick={() => setPreviewImageUrl(imgUrl)}
+                                          />
+                                        ))}
+                                      </div>
+                                      <div>
+                                        <span className="font-bold text-amber-500 font-mono mr-1">{ord?.orderNumber}</span>
+                                        <span className="text-zinc-650 dark:text-zinc-400">{entry.description}</span>
+                                      </div>
+                                    </div>
+                                    <span className="font-mono font-bold text-zinc-700 dark:text-zinc-350">{entry.hours} hr</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+
+            </div>
+
+          </div>
+        </div>
+      )}
 
       {/* Image Preview Modal */}
       {previewImageUrl && (
