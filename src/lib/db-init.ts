@@ -1,5 +1,6 @@
 import { sequelize, Employee, Order, Assignment, AttendanceLog, Timesheet, TimesheetEntry, calculateHoursFromAttendance } from "./sequelize";
 import { Op } from "sequelize";
+import { runMigrations, undoAllMigrations } from "./migrations-runner";
 
 const SEED_EMPLOYEES = [
   { id: "emp-1", name: "Amit Verma", code: "EMP-101", department: "Stitching Section", designation: "Lead Stitcher" },
@@ -45,18 +46,8 @@ let dbInitPromise: Promise<void> | null = null;
 export async function initDb() {
   if (!dbInitPromise) {
     dbInitPromise = (async () => {
-      // Ensure data directory exists for SQLite only
-      if (!process.env.DATABASE_URL) {
-        const path = require("path");
-        const fs = require("fs");
-        const dataDir = path.join(process.cwd(), "src", "data");
-        if (!fs.existsSync(dataDir)) {
-          fs.mkdirSync(dataDir, { recursive: true });
-        }
-      }
-
-      // Synchronize models (Safe sync creates tables if not existing, preventing locks and constraint conflicts)
-      await sequelize.sync();
+      // Run schema migrations programmatically
+      await runMigrations();
 
       const empCount = await Employee.count();
       if (empCount === 0) {
@@ -87,8 +78,11 @@ export async function initDb() {
 }
 
 export async function resetDb() {
-  // Re-sync with force: true to drop all tables and recreate them
-  await sequelize.sync({ force: true });
+  // Undo all executed migrations to wipe the schema cleanly
+  await undoAllMigrations();
+  
+  // Re-run all migrations to build fresh schema tables
+  await runMigrations();
   
   // Seed Employees
   await Employee.bulkCreate(SEED_EMPLOYEES);
