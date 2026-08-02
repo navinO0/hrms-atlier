@@ -2,12 +2,6 @@ import { Sequelize, DataTypes, Model } from "sequelize";
 import path from "path";
 import fs from "fs";
 
-// Ensure data directory exists for SQLite
-const dataDir = path.join(process.cwd(), "src", "data");
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-}
-
 const isPostgres = !!process.env.DATABASE_URL;
 
 declare global {
@@ -38,6 +32,10 @@ if (isPostgres) {
   }
   conn = global.cachedSequelize;
 } else {
+  const dataDir = path.join(process.cwd(), "src", "data");
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
   conn = new Sequelize({
     dialect: "sqlite",
     storage: path.join(dataDir, "database.sqlite"),
