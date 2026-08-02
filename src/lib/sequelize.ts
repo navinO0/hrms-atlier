@@ -10,22 +10,42 @@ if (!fs.existsSync(dataDir)) {
 
 const isPostgres = !!process.env.DATABASE_URL;
 
-export const sequelize = isPostgres
-  ? new Sequelize(process.env.DATABASE_URL!, {
+declare global {
+  var cachedSequelize: Sequelize | undefined;
+}
+
+let conn: Sequelize;
+
+if (isPostgres) {
+  if (!global.cachedSequelize) {
+    global.cachedSequelize = new Sequelize(process.env.DATABASE_URL!, {
       dialect: "postgres",
       logging: false,
+      pool: {
+        max: 4,
+        min: 0,
+        acquire: 30000,
+        idle: 10000,
+      },
       dialectOptions: {
         ssl: {
           require: true,
           rejectUnauthorized: false,
         },
+        keepAlive: true,
       },
-    })
-  : new Sequelize({
-      dialect: "sqlite",
-      storage: path.join(dataDir, "database.sqlite"),
-      logging: false,
     });
+  }
+  conn = global.cachedSequelize;
+} else {
+  conn = new Sequelize({
+    dialect: "sqlite",
+    storage: path.join(dataDir, "database.sqlite"),
+    logging: false,
+  });
+}
+
+export const sequelize = conn;
 
 // Models Definitions
 export class Employee extends Model {
