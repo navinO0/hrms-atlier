@@ -2,7 +2,8 @@ import { Sequelize, DataTypes, Model } from "sequelize";
 import path from "path";
 import fs from "fs";
 
-const isPostgres = !!process.env.DATABASE_URL;
+// Commented out Railway PostgreSQL database connection for now to use local SQLite by default
+const isPostgres = false; // !!process.env.DATABASE_URL;
 
 declare global {
   var cachedSequelize: Sequelize | undefined;
