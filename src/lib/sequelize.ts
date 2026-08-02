@@ -2,8 +2,9 @@ import { Sequelize, DataTypes, Model } from "sequelize";
 import path from "path";
 import fs from "fs";
 
-// Commented out Railway PostgreSQL database connection for now to use local SQLite by default
-const isPostgres = false; // !!process.env.DATABASE_URL;
+// Enable PostgreSQL dynamically on Vercel deployments (to avoid compiling/loading native sqlite3 binaries)
+// or when a local DATABASE_URL is active. Otherwise, it defaults to local SQLite.
+const isPostgres = process.env.VERCEL === "1" || !!process.env.DATABASE_URL;
 
 declare global {
   var cachedSequelize: Sequelize | undefined;
