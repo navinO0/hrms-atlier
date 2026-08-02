@@ -45,6 +45,16 @@ let dbInitPromise: Promise<void> | null = null;
 export async function initDb() {
   if (!dbInitPromise) {
     dbInitPromise = (async () => {
+      // Ensure data directory exists for SQLite only
+      if (!process.env.DATABASE_URL) {
+        const path = require("path");
+        const fs = require("fs");
+        const dataDir = path.join(process.cwd(), "src", "data");
+        if (!fs.existsSync(dataDir)) {
+          fs.mkdirSync(dataDir, { recursive: true });
+        }
+      }
+
       // Synchronize models (Safe sync creates tables if not existing, preventing locks and constraint conflicts)
       await sequelize.sync();
 

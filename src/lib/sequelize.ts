@@ -32,13 +32,9 @@ if (isPostgres) {
   }
   conn = global.cachedSequelize;
 } else {
-  const dataDir = path.join(process.cwd(), "src", "data");
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
   conn = new Sequelize({
     dialect: "sqlite",
-    storage: path.join(dataDir, "database.sqlite"),
+    storage: path.join(process.cwd(), "src", "data", "database.sqlite"),
     logging: false,
   });
 }
