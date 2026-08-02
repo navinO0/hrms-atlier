@@ -6,8 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
-    "postinstall": "npm rebuild --build-from-source sqlite3"
+    "lint": "eslint"
   },
   "dependencies": {
     "lucide-react": "^1.26.0",
@@ -17,9 +16,11 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "sequelize": "^6.37.8",
-    "sqlite3": "^6.0.1",
     "sonner": "^1.7.0",
     "zod": "4.4.3"
+  },
+  "optionalDependencies": {
+    "sqlite3": "^6.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
