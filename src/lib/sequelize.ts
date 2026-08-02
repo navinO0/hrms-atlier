@@ -11,14 +11,16 @@ declare global {
 let conn: Sequelize;
 
 if (isPostgres) {
-  if (!global.cachedSequelize) {
-    global.cachedSequelize = new Sequelize(process.env.DATABASE_URL!, {
+  if (global.cachedSequelize) {
+    conn = global.cachedSequelize;
+  } else {
+    const pgConn = new Sequelize(process.env.DATABASE_URL!, {
       dialect: "postgres",
       logging: false,
       pool: {
         max: 4,
         min: 0,
-        acquire: 30000,
+        acquire: 5000, // Short timeout for fast fallback
         idle: 10000,
       },
       dialectOptions: {
@@ -29,8 +31,22 @@ if (isPostgres) {
         keepAlive: true,
       },
     });
+
+    try {
+      // Test the Postgres connection on import
+      await pgConn.authenticate();
+      global.cachedSequelize = pgConn;
+      conn = pgConn;
+      console.log("[DATABASE] Successfully connected to Railway PostgreSQL.");
+    } catch (err) {
+      console.error("[DATABASE] Railway PostgreSQL connection failed. Falling back to SQLite.", err);
+      conn = new Sequelize({
+        dialect: "sqlite",
+        storage: path.join(process.cwd(), "src", "data", "database.sqlite"),
+        logging: false,
+      });
+    }
   }
-  conn = global.cachedSequelize;
 } else {
   conn = new Sequelize({
     dialect: "sqlite",

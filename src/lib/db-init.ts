@@ -46,6 +46,16 @@ let dbInitPromise: Promise<void> | null = null;
 export async function initDb() {
   if (!dbInitPromise) {
     dbInitPromise = (async () => {
+      // Ensure data directory exists for SQLite
+      if (sequelize.getDialect() === "sqlite") {
+        const path = require("path");
+        const fs = require("fs");
+        const dataDir = path.join(process.cwd(), "src", "data");
+        if (!fs.existsSync(dataDir)) {
+          fs.mkdirSync(dataDir, { recursive: true });
+        }
+      }
+
       // Run schema migrations programmatically
       await runMigrations();
 
