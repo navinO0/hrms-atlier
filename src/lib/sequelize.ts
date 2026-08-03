@@ -1,4 +1,9 @@
 import { Sequelize, DataTypes, Model } from "sequelize";
+// Explicit static import so Next.js/Vercel bundler includes pg in the output.
+// Without this, Sequelize's dynamic require('pg') fails at serverless runtime
+// with "Please install pg package manually".
+import pg from "pg";
+
 
 // ─── Connection Cache ─────────────────────────────────────────────────────────
 
@@ -24,6 +29,9 @@ export async function getSequelize(): Promise<Sequelize> {
     // ── PostgreSQL (Vercel / Railway / any hosted DB) ──────────────────────
     conn = new Sequelize(process.env.DATABASE_URL, {
       dialect: "postgres",
+      // Pass the statically imported pg so Sequelize doesn't dynamically
+      // require('pg') at runtime — which fails in Vercel serverless bundles.
+      dialectModule: pg,
       logging: false,
       pool: {
         max: 4,
