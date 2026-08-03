@@ -2,6 +2,7 @@
 
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { Op } from "sequelize";
 import { initDb, resetDb } from "@/lib/db-init";
 import { 
   Employee, 
@@ -62,7 +63,7 @@ export async function loginAction(username: string, password: string) {
     const emp = await Employee.findOne({
       where: { code: username.trim().toUpperCase() }
     });
-    if (emp && password === "password") {
+    if (emp && password === emp.password) {
       const session = {
         isAuthenticated: true,
         authRole: "Employee" as const,
@@ -77,7 +78,7 @@ export async function loginAction(username: string, password: string) {
       });
       return { success: true, session };
     } else {
-      return { success: false, error: "Invalid username or password. Try EMP-101 and password." };
+      return { success: false, error: "Invalid username or password." };
     }
   }
 }
@@ -89,13 +90,17 @@ export async function logoutAction() {
   return { success: true };
 }
 
-export async function addEmployeeAction(name: string, code: string, department: string, designation: string) {
+export async function addEmployeeAction(name: string, code: string, department: string, designation: string, password?: string) {
+  let validatedPassword = "password";
   try {
-    const validated = EmployeeSchema.parse({ name, code, department, designation });
+    const validated = EmployeeSchema.parse({ name, code, department, designation, password });
     name = validated.name;
     code = validated.code;
     department = validated.department;
     designation = validated.designation;
+    if (validated.password) {
+      validatedPassword = validated.password;
+    }
   } catch (err: any) {
     return { success: false, error: formatZodError(err) };
   }
@@ -112,7 +117,57 @@ export async function addEmployeeAction(name: string, code: string, department: 
     code: code.toUpperCase(),
     department,
     designation,
+    password: validatedPassword,
   });
+
+  revalidatePath("/");
+  return { success: true };
+}
+
+export async function editEmployeeAction(
+  id: string,
+  name: string,
+  code: string,
+  department: string,
+  designation: string,
+  password?: string
+) {
+  try {
+    const validated = EmployeeSchema.parse({ name, code, department, designation, password });
+    name = validated.name;
+    code = validated.code;
+    department = validated.department;
+    designation = validated.designation;
+  } catch (err: any) {
+    return { success: false, error: formatZodError(err) };
+  }
+
+  const existing = await Employee.findOne({
+    where: {
+      code: code.toUpperCase(),
+      id: { [Op.ne]: id }
+    }
+  });
+  if (existing) {
+    return { success: false, error: "An employee with this code already exists." };
+  }
+
+  const emp = await Employee.findByPk(id);
+  if (!emp) {
+    return { success: false, error: "Employee not found." };
+  }
+
+  const updateFields: any = {
+    name,
+    code: code.toUpperCase(),
+    department,
+    designation,
+  };
+  if (password && password.trim() !== "") {
+    updateFields.password = password.trim();
+  }
+
+  await emp.update(updateFields);
 
   revalidatePath("/");
   return { success: true };
@@ -194,6 +249,20 @@ export async function removeAssignmentAction(id: string) {
   return { success: true };
 }
 
+export async function calculateTotalHoursForDay(employeeId: string, date: string): Promise<number> {
+  const logs = await AttendanceLog.findAll({
+    where: { employeeId, date },
+    order: [["createdAt", "ASC"]],
+  });
+  const total = logs.reduce((sum, log) => {
+    return sum + calculateHoursFromAttendance(
+      log.get("checkIn") as string | undefined,
+      log.get("checkOut") as string | undefined
+    );
+  }, 0);
+  return parseFloat(total.toFixed(2));
+}
+
 export async function clockInAction(employeeId: string, date: string, timeStr: string) {
   try {
     const validated = ClockInSchema.parse({ employeeId, date, timeStr });
@@ -209,27 +278,33 @@ export async function clockInAction(employeeId: string, date: string, timeStr: s
     return { success: false, error: "Employee not found." };
   }
 
-  let log = await AttendanceLog.findOne({ where: { employeeId, date } });
-  if (!log) {
-    log = await AttendanceLog.create({
-      id: `att-${Date.now()}`,
-      employeeId,
-      date,
-      checkIn: timeStr,
-      status: "Clocked In",
-    });
-  } else {
-    await log.update({
-      checkIn: timeStr,
-      checkOut: null,
-      status: "Clocked In",
-    });
+
+  // Block double clock-in — employee must clock out before clocking in again
+  const openLog = await AttendanceLog.findOne({
+    where: { employeeId, date, status: "Clocked In" }
+  });
+  if (openLog) {
+    return { success: false, error: "You are already clocked in. Please clock out before clocking in again." };
   }
+
+  // Create a new punch record (multiple allowed per day)
+  const log = await AttendanceLog.create({
+    id: `att-${Date.now()}`,
+    employeeId,
+    date,
+    checkIn: timeStr,
+    status: "Clocked In",
+  });
+
+  // Return ALL today's logs so client can rebuild the full punch list
+  const todayLogs = await AttendanceLog.findAll({
+    where: { employeeId, date },
+    order: [["createdAt", "ASC"]],
+  });
+
   revalidatePath("/");
-  return { success: true, attendanceLog: log.toJSON() };
+  return { success: true, attendanceLog: log.toJSON(), todayLogs: todayLogs.map(l => l.toJSON()) };
 }
-
-
 
 export async function clockOutAction(employeeId: string, date: string, timeStr: string) {
   try {
@@ -246,44 +321,56 @@ export async function clockOutAction(employeeId: string, date: string, timeStr: 
     return { success: false, error: "Employee not found." };
   }
 
-  let log = await AttendanceLog.findOne({ where: { employeeId, date } });
-  let checkInVal: string | undefined = undefined;
+  // Find the currently open punch record (latest "Clocked In")
+  const log = await AttendanceLog.findOne({
+    where: { employeeId, date, status: "Clocked In" },
+    order: [["createdAt", "DESC"]],
+  });
 
   if (!log) {
-    log = await AttendanceLog.create({
-      id: `att-${Date.now()}`,
-      employeeId,
-      date,
-      checkOut: timeStr,
-      status: "Clocked Out",
-    });
-  } else {
-    checkInVal = log.checkIn;
-    await log.update({
-      checkOut: timeStr,
-      status: "Clocked Out",
-    });
+    return { success: false, error: "No active clock-in found. Please clock in first." };
   }
 
-  // Update existing timesheet hours for today to match checkout time
+  await log.update({ checkOut: timeStr, status: "Clocked Out" });
+
+  // Recalculate TOTAL effective hours from all today's completed pairs
+  const allTodayLogs = await AttendanceLog.findAll({
+    where: { employeeId, date },
+    order: [["createdAt", "ASC"]],
+  });
+  const totalEffectiveHours = parseFloat(
+    allTodayLogs.reduce((sum, l) => {
+      return sum + calculateHoursFromAttendance(
+        l.get("checkIn") as string | undefined,
+        l.get("checkOut") as string | undefined
+      );
+    }, 0).toFixed(2)
+  );
+
+  // Sync timesheet hours with total effective time
   let updatedTs: any = null;
-  const ts = await Timesheet.findOne({ 
+  const ts = await Timesheet.findOne({
     where: { employeeId, date },
     include: [{ model: TimesheetEntry, as: "entries" }]
   });
   if (ts) {
-    const finalHours = calculateHoursFromAttendance(checkInVal, timeStr);
     await TimesheetEntry.update(
-      { hours: finalHours },
-      { where: { timesheetId: ts.get('id') as string } }
+      { hours: totalEffectiveHours },
+      { where: { timesheetId: ts.get("id") as string } }
     );
     await ts.reload();
     updatedTs = ts.toJSON();
   }
 
   revalidatePath("/");
-  return { success: true, attendanceLog: log.toJSON(), timesheet: updatedTs };
+  return {
+    success: true,
+    attendanceLog: log.toJSON(),
+    todayLogs: allTodayLogs.map(l => l.toJSON()),
+    timesheet: updatedTs,
+  };
 }
+
 
 export async function saveManualAttendanceAction(employeeId: string, date: string, checkIn: string, checkOut: string) {
   try {
@@ -381,8 +468,7 @@ export async function submitTimesheetAction(employeeId: string, date: string, en
     }, { transaction: t });
 
     // Auto-calculate hours from check-in details
-    const log = await AttendanceLog.findOne({ where: { employeeId, date } });
-    const computedHours = calculateHoursFromAttendance(log?.checkIn, log?.checkOut);
+    const computedHours = await calculateTotalHoursForDay(employeeId, date);
 
     const formattedEntries = entries.map((entry, idx) => ({
       id: `tse-${Date.now()}-${idx}`,
@@ -468,8 +554,7 @@ export async function updateTimesheetAction(timesheetId: string, date: string, e
 
     // Auto-calculate hours from check-in details
     const employeeId = (timesheet.dataValues as any)?.employeeId || timesheet.employeeId;
-    const log = employeeId ? await AttendanceLog.findOne({ where: { employeeId, date } }) : null;
-    const computedHours = calculateHoursFromAttendance(log?.checkIn, log?.checkOut);
+    const computedHours = await calculateTotalHoursForDay(employeeId, date);
 
     // Create new entries
     const formattedEntries = entries.map((entry, idx) => ({

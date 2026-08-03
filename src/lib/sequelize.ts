@@ -25,47 +25,35 @@ export async function getSequelize(): Promise<Sequelize> {
 
   let conn: Sequelize;
 
-  if (process.env.DATABASE_URL) {
-    // ── PostgreSQL (Vercel / Railway / any hosted DB) ──────────────────────
-    conn = new Sequelize(process.env.DATABASE_URL, {
-      dialect: "postgres",
-      // Pass the statically imported pg so Sequelize doesn't dynamically
-      // require('pg') at runtime — which fails in Vercel serverless bundles.
-      dialectModule: pg,
-      logging: false,
-      pool: {
-        max: 4,
-        min: 0,
-        acquire: 15000,
-        idle: 10000,
-      },
-      dialectOptions: {
-        ssl: {
-          require: true,
-          rejectUnauthorized: false,
-        },
-        keepAlive: true,
-      },
-    });
-
-    // Verify the connection is reachable before caching
-    await conn.authenticate();
-    console.log("[DATABASE] Connected to PostgreSQL successfully.");
-  } else {
-    // ── SQLite fallback for local development ──────────────────────────────
-    const path = require("path") as typeof import("path");
-    const fs = require("fs") as typeof import("fs");
-    const dataDir = path.join(process.cwd(), "src", "data");
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
-    conn = new Sequelize({
-      dialect: "sqlite",
-      storage: path.join(dataDir, "database.sqlite"),
-      logging: false,
-    });
-    console.log("[DATABASE] Using local SQLite database.");
+  if (!process.env.DATABASE_URL) {
+    throw new Error("Missing DATABASE_URL environment variable! Relying only on PostgreSQL.");
   }
+
+  // ── PostgreSQL (Vercel / Railway / any hosted DB) ──────────────────────
+  conn = new Sequelize(process.env.DATABASE_URL, {
+    dialect: "postgres",
+    // Pass the statically imported pg so Sequelize doesn't dynamically
+    // require('pg') at runtime — which fails in Vercel serverless bundles.
+    dialectModule: pg,
+    logging: false,
+    pool: {
+      max: 4,
+      min: 0,
+      acquire: 15000,
+      idle: 10000,
+    },
+    dialectOptions: {
+      ssl: {
+        require: true,
+        rejectUnauthorized: false,
+      },
+      keepAlive: true,
+    },
+  });
+
+  // Verify the connection is reachable before caching
+  await conn.authenticate();
+  console.log("[DATABASE] Connected to PostgreSQL successfully.");
 
   global.cachedSequelize = conn;
   return conn;
@@ -75,51 +63,52 @@ export async function getSequelize(): Promise<Sequelize> {
 // Models are initialized lazily in initModels() called from db-init.ts.
 
 export class Employee extends Model {
-  public id!: string;
-  public name!: string;
-  public code!: string;
-  public department!: string;
-  public designation!: string;
+  declare id: string;
+  declare name: string;
+  declare code: string;
+  declare department: string;
+  declare designation: string;
+  declare password: string;
 }
 
 export class Order extends Model {
-  public id!: string;
-  public orderNumber!: string;
-  public productName!: string;
+  declare id: string;
+  declare orderNumber: string;
+  declare productName: string;
 }
 
 export class Assignment extends Model {
-  public id!: string;
-  public employeeId!: string;
-  public orderId!: string;
-  public assignedDate!: string;
-  public notes?: string;
+  declare id: string;
+  declare employeeId: string;
+  declare orderId: string;
+  declare assignedDate: string;
+  declare notes?: string | null;
 }
 
 export class AttendanceLog extends Model {
-  public id!: string;
-  public employeeId!: string;
-  public date!: string;
-  public checkIn?: string;
-  public checkOut?: string;
-  public status!: "Clocked In" | "Clocked Out";
+  declare id: string;
+  declare employeeId: string;
+  declare date: string;
+  declare checkIn?: string;
+  declare checkOut?: string;
+  declare status: "Clocked In" | "Clocked Out";
 }
 
 export class Timesheet extends Model {
-  public id!: string;
-  public employeeId!: string;
-  public date!: string;
-  public submittedAt!: string;
-  public readonly entries?: TimesheetEntry[];
+  declare id: string;
+  declare employeeId: string;
+  declare date: string;
+  declare submittedAt: string;
+  declare readonly entries?: TimesheetEntry[];
 }
 
 export class TimesheetEntry extends Model {
-  public id!: string;
-  public timesheetId!: string;
-  public orderId!: string;
-  public description!: string;
-  public hours!: number;
-  public images?: string[];
+  declare id: string;
+  declare timesheetId: string;
+  declare orderId: string;
+  declare description: string;
+  declare hours: number;
+  declare images?: string[];
 }
 
 // ─── Model Initializer ────────────────────────────────────────────────────────
@@ -141,6 +130,7 @@ export function initModels(sequelize: Sequelize): void {
       code: { type: DataTypes.STRING, allowNull: false, unique: true },
       department: { type: DataTypes.STRING, allowNull: false },
       designation: { type: DataTypes.STRING, allowNull: false },
+      password: { type: DataTypes.STRING, allowNull: false, defaultValue: "password" },
     },
     { sequelize, modelName: "Employee" }
   );

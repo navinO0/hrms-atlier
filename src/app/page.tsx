@@ -77,7 +77,7 @@ export default async function Page() {
             </svg>
           </div>
           <div className="space-y-1">
-            <h1 className="text-sm font-black text-zinc-900 uppercase tracking-wide">Database Connection Failed</h1>
+            <p className="text-sm font-black text-zinc-900 uppercase tracking-wide">Database Connection Failed</p>
             <p className="text-[11px] text-zinc-500">The application could not establish a connection to the database server.</p>
           </div>
           <div className="bg-zinc-50 border border-zinc-150 p-3.5 text-left font-mono text-[9px] text-zinc-650 break-all leading-relaxed whitespace-pre-wrap">

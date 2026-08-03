@@ -8,6 +8,7 @@ export async function up(queryInterface: QueryInterface): Promise<void> {
     code: { type: DataTypes.STRING, allowNull: false, unique: true },
     department: { type: DataTypes.STRING, allowNull: false },
     designation: { type: DataTypes.STRING, allowNull: false },
+    password: { type: DataTypes.STRING, allowNull: false, defaultValue: "password" },
     createdAt: { type: DataTypes.DATE, allowNull: false },
     updatedAt: { type: DataTypes.DATE, allowNull: false }
   });

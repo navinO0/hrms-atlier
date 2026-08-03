@@ -10,6 +10,7 @@ export const EmployeeSchema = z.object({
   code: z.string().min(1, "Employee code is required").max(50, "Code must be under 50 characters").trim(),
   department: z.string().min(1, "Department is required").max(255, "Department must be under 255 characters").trim(),
   designation: z.string().min(1, "Designation is required").max(255, "Designation must be under 255 characters").trim(),
+  password: z.string().min(4, "Password must be at least 4 characters").max(100, "Password must be under 100 characters").trim().optional().or(z.literal("")),
 });
 
 export const OrderSchema = z.object({

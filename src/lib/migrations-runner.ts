@@ -1,5 +1,6 @@
 import { getSequelize } from "./sequelize";
 import * as initSchemas from "../migrations/00_init_schemas";
+import * as addPasswordToEmployees from "../migrations/01_add_password_to_employees";
 
 interface Migration {
   name: string;
@@ -12,6 +13,11 @@ const MIGRATIONS: Migration[] = [
     name: "00_init_schemas.ts",
     up: initSchemas.up,
     down: initSchemas.down
+  },
+  {
+    name: "01_add_password_to_employees.ts",
+    up: addPasswordToEmployees.up,
+    down: addPasswordToEmployees.down
   }
 ];
 
