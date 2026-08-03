@@ -1,4 +1,4 @@
-import { sequelize, Employee, Order, Assignment, AttendanceLog, Timesheet, TimesheetEntry, calculateHoursFromAttendance } from "./sequelize";
+import { getSequelize, initModels, Employee, Order, Assignment, AttendanceLog, Timesheet, TimesheetEntry, calculateHoursFromAttendance } from "./sequelize";
 import { Op } from "sequelize";
 import { runMigrations, undoAllMigrations } from "./migrations-runner";
 
@@ -46,39 +46,24 @@ let dbInitPromise: Promise<void> | null = null;
 export async function initDb() {
   if (!dbInitPromise) {
     dbInitPromise = (async () => {
-      // Ensure data directory exists for SQLite
-      if (sequelize.getDialect() === "sqlite") {
-        const path = require("path");
-        const fs = require("fs");
-        const dataDir = path.join(process.cwd(), "src", "data");
-        if (!fs.existsSync(dataDir)) {
-          fs.mkdirSync(dataDir, { recursive: true });
-        }
-      }
+      // 1. Establish DB connection (lazy — no top-level await)
+      const sequelize = await getSequelize();
 
-      // Run schema migrations programmatically
+      // 2. Initialize models against the live connection
+      initModels(sequelize);
+
+      // 3. Run schema migrations
       await runMigrations();
 
+      // 4. Seed data if empty
       const empCount = await Employee.count();
       if (empCount === 0) {
-        // Seed Employees
         await Employee.bulkCreate(SEED_EMPLOYEES);
-
-        // Seed Orders
         await Order.bulkCreate(SEED_ORDERS);
-
-        // Seed Assignments
         await Assignment.bulkCreate(SEED_ASSIGNMENTS);
-
-        // Seed Attendance
         await AttendanceLog.bulkCreate(SEED_ATTENDANCE);
-
-        // Seed Timesheets
         await Timesheet.bulkCreate(SEED_TIMESHEETS);
-
-        // Seed Timesheet Entries
         await TimesheetEntry.bulkCreate(SEED_TIMESHEET_ENTRIES);
-
         console.log("Database initialized and populated with seed data successfully!");
       }
     })();
@@ -88,28 +73,21 @@ export async function initDb() {
 }
 
 export async function resetDb() {
-  // Undo all executed migrations to wipe the schema cleanly
+  // Reset the init promise so next call re-seeds
+  dbInitPromise = null;
+
+  // Ensure connection + models are ready
+  const sequelize = await getSequelize();
+  initModels(sequelize);
+
   await undoAllMigrations();
-  
-  // Re-run all migrations to build fresh schema tables
   await runMigrations();
-  
-  // Seed Employees
+
   await Employee.bulkCreate(SEED_EMPLOYEES);
-
-  // Seed Orders
   await Order.bulkCreate(SEED_ORDERS);
-
-  // Seed Assignments
   await Assignment.bulkCreate(SEED_ASSIGNMENTS);
-
-  // Seed Attendance
   await AttendanceLog.bulkCreate(SEED_ATTENDANCE);
-
-  // Seed Timesheets
   await Timesheet.bulkCreate(SEED_TIMESHEETS);
-
-  // Seed Timesheet Entries
   await TimesheetEntry.bulkCreate(SEED_TIMESHEET_ENTRIES);
 
   console.log("Database reset and populated with seed data successfully!");
@@ -123,7 +101,6 @@ async function autoCheckoutForgottenLogs() {
     const day = String(d.getDate()).padStart(2, '0');
     const todayStr = `${year}-${month}-${day}`;
 
-    // Find all attendance logs that are still "Clocked In" from previous days
     const forgottenLogs = await AttendanceLog.findAll({
       where: {
         status: "Clocked In",
@@ -136,17 +113,15 @@ async function autoCheckoutForgottenLogs() {
     if (forgottenLogs.length > 0) {
       console.log(`[EOD AUTO-CHECKOUT] Found ${forgottenLogs.length} forgotten attendance logs. Clocking out...`);
       for (const log of forgottenLogs) {
-        // Mark as clocked out at EOD (06:00 PM)
         await log.update({
           checkOut: "06:00 PM",
           status: "Clocked Out"
         });
 
-        // Also auto-calculate/update corresponding timesheet hours if timesheet exists
         const employeeId = log.get('employeeId') as string;
         const logDate = log.get('date') as string;
         const checkInVal = log.get('checkIn') as string;
-        
+
         const ts = await Timesheet.findOne({
           where: { employeeId, date: logDate }
         });

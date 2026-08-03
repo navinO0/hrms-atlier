@@ -1,28 +1,34 @@
 import { Sequelize, DataTypes, Model } from "sequelize";
-import path from "path";
-import fs from "fs";
 
-// Enable PostgreSQL dynamically on Vercel deployments (to avoid compiling/loading native sqlite3 binaries)
-// or when a local DATABASE_URL is active. Otherwise, it defaults to local SQLite.
-const isPostgres = process.env.VERCEL === "1" || !!process.env.DATABASE_URL;
+// ─── Connection Cache ─────────────────────────────────────────────────────────
 
 declare global {
   var cachedSequelize: Sequelize | undefined;
 }
 
-let conn: Sequelize;
-
-if (isPostgres) {
+/**
+ * Lazily creates and caches a Sequelize connection.
+ *
+ * IMPORTANT: This must be an async function, NOT module-level `await`.
+ * Vercel / Next.js does NOT support top-level await in server modules —
+ * using it causes 500 crashes on every request at cold-start.
+ */
+export async function getSequelize(): Promise<Sequelize> {
   if (global.cachedSequelize) {
-    conn = global.cachedSequelize;
-  } else {
-    const pgConn = new Sequelize(process.env.DATABASE_URL!, {
+    return global.cachedSequelize;
+  }
+
+  let conn: Sequelize;
+
+  if (process.env.DATABASE_URL) {
+    // ── PostgreSQL (Vercel / Railway / any hosted DB) ──────────────────────
+    conn = new Sequelize(process.env.DATABASE_URL, {
       dialect: "postgres",
       logging: false,
       pool: {
         max: 4,
         min: 0,
-        acquire: 5000, // Short timeout for fast fallback
+        acquire: 15000,
         idle: 10000,
       },
       dialectOptions: {
@@ -34,32 +40,32 @@ if (isPostgres) {
       },
     });
 
-    try {
-      // Test the Postgres connection on import
-      await pgConn.authenticate();
-      global.cachedSequelize = pgConn;
-      conn = pgConn;
-      console.log("[DATABASE] Successfully connected to Railway PostgreSQL.");
-    } catch (err) {
-      console.error("[DATABASE] Railway PostgreSQL connection failed. Falling back to SQLite.", err);
-      conn = new Sequelize({
-        dialect: "sqlite",
-        storage: path.join(process.cwd(), "src", "data", "database.sqlite"),
-        logging: false,
-      });
+    // Verify the connection is reachable before caching
+    await conn.authenticate();
+    console.log("[DATABASE] Connected to PostgreSQL successfully.");
+  } else {
+    // ── SQLite fallback for local development ──────────────────────────────
+    const path = require("path") as typeof import("path");
+    const fs = require("fs") as typeof import("fs");
+    const dataDir = path.join(process.cwd(), "src", "data");
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
     }
+    conn = new Sequelize({
+      dialect: "sqlite",
+      storage: path.join(dataDir, "database.sqlite"),
+      logging: false,
+    });
+    console.log("[DATABASE] Using local SQLite database.");
   }
-} else {
-  conn = new Sequelize({
-    dialect: "sqlite",
-    storage: path.join(process.cwd(), "src", "data", "database.sqlite"),
-    logging: false,
-  });
+
+  global.cachedSequelize = conn;
+  return conn;
 }
 
-export const sequelize = conn;
+// ─── Model Definitions ────────────────────────────────────────────────────────
+// Models are initialized lazily in initModels() called from db-init.ts.
 
-// Models Definitions
 export class Employee extends Model {
   public id!: string;
   public name!: string;
@@ -67,30 +73,12 @@ export class Employee extends Model {
   public department!: string;
   public designation!: string;
 }
-Employee.init(
-  {
-    id: { type: DataTypes.STRING, primaryKey: true },
-    name: { type: DataTypes.STRING, allowNull: false },
-    code: { type: DataTypes.STRING, allowNull: false, unique: true },
-    department: { type: DataTypes.STRING, allowNull: false },
-    designation: { type: DataTypes.STRING, allowNull: false },
-  },
-  { sequelize, modelName: "Employee" }
-);
 
 export class Order extends Model {
   public id!: string;
   public orderNumber!: string;
   public productName!: string;
 }
-Order.init(
-  {
-    id: { type: DataTypes.STRING, primaryKey: true },
-    orderNumber: { type: DataTypes.STRING, allowNull: false, unique: true },
-    productName: { type: DataTypes.STRING, allowNull: false },
-  },
-  { sequelize, modelName: "Order" }
-);
 
 export class Assignment extends Model {
   public id!: string;
@@ -99,16 +87,6 @@ export class Assignment extends Model {
   public assignedDate!: string;
   public notes?: string;
 }
-Assignment.init(
-  {
-    id: { type: DataTypes.STRING, primaryKey: true },
-    employeeId: { type: DataTypes.STRING, allowNull: false },
-    orderId: { type: DataTypes.STRING, allowNull: false },
-    assignedDate: { type: DataTypes.STRING, allowNull: false },
-    notes: { type: DataTypes.TEXT, allowNull: true },
-  },
-  { sequelize, modelName: "Assignment" }
-);
 
 export class AttendanceLog extends Model {
   public id!: string;
@@ -118,17 +96,6 @@ export class AttendanceLog extends Model {
   public checkOut?: string;
   public status!: "Clocked In" | "Clocked Out";
 }
-AttendanceLog.init(
-  {
-    id: { type: DataTypes.STRING, primaryKey: true },
-    employeeId: { type: DataTypes.STRING, allowNull: false },
-    date: { type: DataTypes.STRING, allowNull: false },
-    checkIn: { type: DataTypes.STRING, allowNull: true },
-    checkOut: { type: DataTypes.STRING, allowNull: true },
-    status: { type: DataTypes.STRING, allowNull: false },
-  },
-  { sequelize, modelName: "AttendanceLog" }
-);
 
 export class Timesheet extends Model {
   public id!: string;
@@ -137,15 +104,6 @@ export class Timesheet extends Model {
   public submittedAt!: string;
   public readonly entries?: TimesheetEntry[];
 }
-Timesheet.init(
-  {
-    id: { type: DataTypes.STRING, primaryKey: true },
-    employeeId: { type: DataTypes.STRING, allowNull: false },
-    date: { type: DataTypes.STRING, allowNull: false },
-    submittedAt: { type: DataTypes.STRING, allowNull: false },
-  },
-  { sequelize, modelName: "Timesheet" }
-);
 
 export class TimesheetEntry extends Model {
   public id!: string;
@@ -155,42 +113,111 @@ export class TimesheetEntry extends Model {
   public hours!: number;
   public images?: string[];
 }
-TimesheetEntry.init(
-  {
-    id: { type: DataTypes.STRING, primaryKey: true },
-    timesheetId: { type: DataTypes.STRING, allowNull: false },
-    orderId: { type: DataTypes.STRING, allowNull: true },
-    description: { type: DataTypes.TEXT, allowNull: false },
-    hours: { type: DataTypes.FLOAT, allowNull: false },
-    images: {
-      type: DataTypes.TEXT,
-      allowNull: true,
-      get() {
-        const val = this.getDataValue("images");
-        return val ? JSON.parse(val) : [];
-      },
-      set(val) {
-        this.setDataValue("images", val ? JSON.stringify(val) : JSON.stringify([]));
+
+// ─── Model Initializer ────────────────────────────────────────────────────────
+
+let _modelsInitialized = false;
+
+/**
+ * Initializes all Sequelize models against the given connection.
+ * Idempotent — safe to call multiple times.
+ */
+export function initModels(sequelize: Sequelize): void {
+  if (_modelsInitialized) return;
+  _modelsInitialized = true;
+
+  Employee.init(
+    {
+      id: { type: DataTypes.STRING, primaryKey: true },
+      name: { type: DataTypes.STRING, allowNull: false },
+      code: { type: DataTypes.STRING, allowNull: false, unique: true },
+      department: { type: DataTypes.STRING, allowNull: false },
+      designation: { type: DataTypes.STRING, allowNull: false },
+    },
+    { sequelize, modelName: "Employee" }
+  );
+
+  Order.init(
+    {
+      id: { type: DataTypes.STRING, primaryKey: true },
+      orderNumber: { type: DataTypes.STRING, allowNull: false, unique: true },
+      productName: { type: DataTypes.STRING, allowNull: false },
+    },
+    { sequelize, modelName: "Order" }
+  );
+
+  Assignment.init(
+    {
+      id: { type: DataTypes.STRING, primaryKey: true },
+      employeeId: { type: DataTypes.STRING, allowNull: false },
+      orderId: { type: DataTypes.STRING, allowNull: false },
+      assignedDate: { type: DataTypes.STRING, allowNull: false },
+      notes: { type: DataTypes.TEXT, allowNull: true },
+    },
+    { sequelize, modelName: "Assignment" }
+  );
+
+  AttendanceLog.init(
+    {
+      id: { type: DataTypes.STRING, primaryKey: true },
+      employeeId: { type: DataTypes.STRING, allowNull: false },
+      date: { type: DataTypes.STRING, allowNull: false },
+      checkIn: { type: DataTypes.STRING, allowNull: true },
+      checkOut: { type: DataTypes.STRING, allowNull: true },
+      status: { type: DataTypes.STRING, allowNull: false },
+    },
+    { sequelize, modelName: "AttendanceLog" }
+  );
+
+  Timesheet.init(
+    {
+      id: { type: DataTypes.STRING, primaryKey: true },
+      employeeId: { type: DataTypes.STRING, allowNull: false },
+      date: { type: DataTypes.STRING, allowNull: false },
+      submittedAt: { type: DataTypes.STRING, allowNull: false },
+    },
+    { sequelize, modelName: "Timesheet" }
+  );
+
+  TimesheetEntry.init(
+    {
+      id: { type: DataTypes.STRING, primaryKey: true },
+      timesheetId: { type: DataTypes.STRING, allowNull: false },
+      orderId: { type: DataTypes.STRING, allowNull: true },
+      description: { type: DataTypes.TEXT, allowNull: false },
+      hours: { type: DataTypes.FLOAT, allowNull: false },
+      images: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+        get() {
+          const val = this.getDataValue("images");
+          return val ? JSON.parse(val) : [];
+        },
+        set(val) {
+          this.setDataValue("images", val ? JSON.stringify(val) : JSON.stringify([]));
+        },
       },
     },
-  },
-  { sequelize, modelName: "TimesheetEntry" }
-);
+    { sequelize, modelName: "TimesheetEntry" }
+  );
 
-// Relationships
-Timesheet.hasMany(TimesheetEntry, { foreignKey: "timesheetId", as: "entries", onDelete: "CASCADE" });
-TimesheetEntry.belongsTo(Timesheet, { foreignKey: "timesheetId", as: "timesheet" });
+  // ─── Relationships ──────────────────────────────────────────────────────────
+  Timesheet.hasMany(TimesheetEntry, { foreignKey: "timesheetId", as: "entries", onDelete: "CASCADE" });
+  TimesheetEntry.belongsTo(Timesheet, { foreignKey: "timesheetId", as: "timesheet" });
 
-Assignment.belongsTo(Employee, { foreignKey: "employeeId", as: "employee" });
-Assignment.belongsTo(Order, { foreignKey: "orderId", as: "order" });
+  Assignment.belongsTo(Employee, { foreignKey: "employeeId", as: "employee" });
+  Assignment.belongsTo(Order, { foreignKey: "orderId", as: "order" });
 
-TimesheetEntry.belongsTo(Order, { foreignKey: "orderId", as: "order" });
+  TimesheetEntry.belongsTo(Order, { foreignKey: "orderId", as: "order" });
 
-AttendanceLog.belongsTo(Employee, { foreignKey: "employeeId", as: "employee" });
+  AttendanceLog.belongsTo(Employee, { foreignKey: "employeeId", as: "employee" });
+}
+
+// ─── Helper Utilities ─────────────────────────────────────────────────────────
 
 export function calculateHoursFromAttendance(checkInStr?: string, checkOutStr?: string): number {
   if (!checkInStr) return 0;
-  
+
   const parseTime = (timeStr: string): Date | null => {
     const match = timeStr.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
     if (!match) return null;
@@ -209,13 +236,12 @@ export function calculateHoursFromAttendance(checkInStr?: string, checkOutStr?: 
 
   let outTime = checkOutStr ? parseTime(checkOutStr) : null;
   if (!outTime) {
-    // If not checked out yet, calculate up to current time
     outTime = new Date();
   }
 
   const diffMs = outTime.getTime() - inTime.getTime();
   if (diffMs <= 0) return 0;
-  
+
   const diffHours = diffMs / (1000 * 60 * 60);
   return parseFloat(diffHours.toFixed(2));
 }

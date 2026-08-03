@@ -2,7 +2,7 @@
 
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
-import { resetDb } from "@/lib/db-init";
+import { initDb, resetDb } from "@/lib/db-init";
 import { 
   Employee, 
   Order, 
@@ -10,7 +10,7 @@ import {
   AttendanceLog, 
   Timesheet, 
   TimesheetEntry, 
-  sequelize,
+  getSequelize,
   calculateHoursFromAttendance
 } from "@/lib/sequelize";
 import { 
@@ -369,6 +369,7 @@ export async function submitTimesheetAction(employeeId: string, date: string, en
     }
   }
 
+  const sequelize = await getSequelize();
   const t = await sequelize.transaction();
   try {
     const timesheetId = `ts-${Date.now()}`;
@@ -454,6 +455,7 @@ export async function updateTimesheetAction(timesheetId: string, date: string, e
     }
   }
 
+  const sequelize = await getSequelize();
   const t = await sequelize.transaction();
   try {
     // Delete existing entries

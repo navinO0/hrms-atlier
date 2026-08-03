@@ -1,4 +1,4 @@
-import { sequelize } from "./sequelize";
+import { getSequelize } from "./sequelize";
 import * as initSchemas from "../migrations/00_init_schemas";
 
 interface Migration {
@@ -19,9 +19,7 @@ const MIGRATIONS: Migration[] = [
  * Ensures the SequelizeMeta table exists in the database.
  */
 async function ensureMetaTable(): Promise<void> {
-  const queryInterface = sequelize.getQueryInterface();
-  
-  // Create table if not exists using standard Sequelize queryInterface
+  const sequelize = await getSequelize();
   const isPostgres = !!process.env.DATABASE_URL;
   const varcharType = isPostgres ? "VARCHAR(255)" : "TEXT";
 
@@ -37,10 +35,10 @@ async function ensureMetaTable(): Promise<void> {
  */
 export async function runMigrations(): Promise<void> {
   console.log("[MIGRATIONS] Starting migrations check...");
-  
+
+  const sequelize = await getSequelize();
   await ensureMetaTable();
 
-  // Fetch completed migrations
   const completed = (await sequelize.query(
     `SELECT "name" FROM "SequelizeMeta"`,
     { type: "SELECT" as any }
@@ -55,7 +53,7 @@ export async function runMigrations(): Promise<void> {
 
       try {
         await migration.up(sequelize.getQueryInterface());
-        
+
         await sequelize.query(
           `INSERT INTO "SequelizeMeta" ("name") VALUES (:name)`,
           {
@@ -82,20 +80,18 @@ export async function runMigrations(): Promise<void> {
  */
 export async function undoAllMigrations(): Promise<void> {
   console.log("[MIGRATIONS] Reverting all migrations...");
-  
+
+  const sequelize = await getSequelize();
   await ensureMetaTable();
 
-  // Run in reverse order
   const reversedMigrations = [...MIGRATIONS].reverse();
 
   for (const migration of reversedMigrations) {
     const transaction = await sequelize.transaction();
 
     try {
-      // Revert schema changes
       await migration.down(sequelize.getQueryInterface());
-      
-      // Delete from metadata
+
       await sequelize.query(
         `DELETE FROM "SequelizeMeta" WHERE "name" = :name`,
         {
@@ -109,14 +105,12 @@ export async function undoAllMigrations(): Promise<void> {
     } catch (err) {
       await transaction.rollback();
       console.error(`[MIGRATIONS] Error reverting migration ${migration.name}:`, err);
-      // Continue trying to clean tables if one fails, or throw to block
       throw err;
     }
   }
-  
-  // Finally drop the SequelizeMeta table itself
+
   try {
-    await sequelize.getQueryInterface().dropTable("SequelizeMeta");
+    await (await getSequelize()).getQueryInterface().dropTable("SequelizeMeta");
   } catch (e) {
     // Ignore if already dropped
   }
