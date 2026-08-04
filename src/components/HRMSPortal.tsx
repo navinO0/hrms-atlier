@@ -24,7 +24,9 @@ import {
   Fingerprint,
   TrendingUp,
   X,
-  Trash2
+  Trash2,
+  Banknote,
+  Settings
 } from "lucide-react";
 
 // ── Toast System ──────────────────────────────────────────────
@@ -42,7 +44,17 @@ import {
   submitTimesheetAction,
   updateTimesheetAction,
   resetDatabaseAction,
-  deleteEmployeeAction
+  deleteEmployeeAction,
+  processPayrollPaymentAction,
+  addDepartmentAction,
+  deleteDepartmentAction,
+  addPayStructureAction,
+  deletePayStructureAction,
+  addEmploymentTypeAction,
+  deleteEmploymentTypeAction,
+  editEmploymentTypeAction,
+  editDepartmentAction,
+  editPayStructureAction
 } from "@/app/actions";
 
 interface Employee {
@@ -52,6 +64,13 @@ interface Employee {
   department: string;
   designation: string;
   profilePhoto?: string | null;
+  payType?: string;
+  payRate?: number;
+  lastPaidAt?: string | null;
+  checkInTime?: string | null;
+  checkOutTime?: string | null;
+  employmentType?: string;
+  breakTime?: number;
 }
 
 
@@ -84,10 +103,48 @@ interface Timesheet {
   employee?: Employee;
 }
 
+interface PayrollRecord {
+  id: string;
+  employeeId: string;
+  amount: number;
+  netHours: number;
+  grossHours: number;
+  lunchDeductionHours: number;
+  payType: string;
+  payRate: number;
+  periodStart: string;
+  periodEnd: string;
+  paidAt: string;
+  notes?: string | null;
+  employee?: Employee;
+}
+
+interface EmploymentType {
+  id: string;
+  name: string;
+  standardHours: number;
+  minHoursForBreak: number;
+}
+
+interface Department {
+  id: string;
+  name: string;
+}
+
+interface PayStructure {
+  id: string;
+  name: string;
+  daysPerPeriod: number;
+}
+
 interface HRMSPortalProps {
   initialEmployees: Employee[];
   initialAttendance: AttendanceLog[];
   initialTimesheets: Timesheet[];
+  initialPayrollRecords?: PayrollRecord[];
+  initialEmploymentTypes?: EmploymentType[];
+  initialDepartments?: Department[];
+  initialPayStructures?: PayStructure[];
   initialSession: {
     isAuthenticated: boolean;
     authRole: "Admin" | "Employee" | null;
@@ -167,6 +224,16 @@ const getInitials = (name: string) => {
   return name.slice(0, 2).toUpperCase();
 };
 
+const formatTime12h = (date: Date): string => {
+  let hours = date.getHours();
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12; // the hour '0' should be '12'
+  const hoursStr = String(hours).padStart(2, '0');
+  return `${hoursStr}:${minutes} ${ampm}`;
+};
+
 const getAvatarBg = (name: string) => {
   if (!name) return "from-zinc-500 to-zinc-650";
   const colors = [
@@ -189,6 +256,10 @@ export default function HRMSPortal({
   initialEmployees,
   initialAttendance,
   initialTimesheets,
+  initialPayrollRecords,
+  initialEmploymentTypes,
+  initialDepartments,
+  initialPayStructures,
   initialSession,
 }: HRMSPortalProps) {
   // ── Sonner Toast System ──────────────────────────────────────
@@ -211,7 +282,7 @@ export default function HRMSPortal({
   const [activeEmpId, setActiveEmpId] = useState<string>(
     initialSession?.authEmployeeId || initialEmployees[0]?.id || ""
   );
-  const [adminTab, setAdminTab] = useState<"status" | "logs" | "roster">("status");
+  const [adminTab, setAdminTab] = useState<"status" | "logs" | "roster" | "payroll" | "settings">("status");
   const [activePreviewImages, setActivePreviewImages] = useState<string[]>([]);
   const [activePreviewIndex, setActivePreviewIndex] = useState<number>(0);
   const handleOpenPreview = (images: string[], index: number) => {
@@ -278,6 +349,45 @@ export default function HRMSPortal({
   const [empFormDept, setEmpFormDept] = useState("Stitching Section");
   const [empFormDesg, setEmpFormDesg] = useState("Stitching Operator");
   const [empFormPhoto, setEmpFormPhoto] = useState("");
+  const [empFormPayType, setEmpFormPayType] = useState<string>("Monthly");
+  const [empFormPayRate, setEmpFormPayRate] = useState<number | string>("");
+  const [empFormCheckInTime, setEmpFormCheckInTime] = useState("09:00");
+  const [empFormCheckOutTime, setEmpFormCheckOutTime] = useState("18:00");
+  const [empFormEmploymentType, setEmpFormEmploymentType] = useState<string>("Full-Time");
+  const [empFormBreakTime, setEmpFormBreakTime] = useState<number | string>(60);
+
+  // Settings & Custom Employment Types State
+  const [employmentTypes, setEmploymentTypes] = useState<EmploymentType[]>(initialEmploymentTypes || []);
+  const [newEtName, setNewEtName] = useState("");
+  const [newEtHours, setNewEtHours] = useState<number | string>(8);
+  const [newEtBreakThreshold, setNewEtBreakThreshold] = useState<number | string>(5);
+  const [isSavingEt, setIsSavingEt] = useState(false);
+  const [editingEtId, setEditingEtId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setEmploymentTypes(initialEmploymentTypes || []);
+  }, [initialEmploymentTypes]);
+
+  // Settings & Custom Departments State
+  const [departments, setDepartments] = useState<Department[]>(initialDepartments || []);
+  const [newDeptName, setNewDeptName] = useState("");
+  const [isSavingDept, setIsSavingDept] = useState(false);
+  const [editingDeptId, setEditingDeptId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDepartments(initialDepartments || []);
+  }, [initialDepartments]);
+
+  // Settings & Custom Pay Structures State
+  const [payStructures, setPayStructures] = useState<PayStructure[]>(initialPayStructures || []);
+  const [newPsName, setNewPsName] = useState("");
+  const [newPsDays, setNewPsDays] = useState<number | string>(26);
+  const [isSavingPs, setIsSavingPs] = useState(false);
+  const [editingPsId, setEditingPsId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPayStructures(initialPayStructures || []);
+  }, [initialPayStructures]);
 
   // Form State: Timesheet Submission
   const [timesheetDate, setTimesheetDate] = useState<string>("");
@@ -298,6 +408,20 @@ export default function HRMSPortal({
   // Ledger Filter States
   const [filterEmployeeId, setFilterEmployeeId] = useState("");
   const [filterDate, setFilterDate] = useState("");
+
+  // Payroll & Payout Modal State
+  const [selectedPayEmp, setSelectedPayEmp] = useState<Employee | null>(null);
+  const [payModalNotes, setPayModalNotes] = useState<string>("");
+  const [isProcessingPayment, setIsProcessingPayment] = useState<boolean>(false);
+  const [payrollRecords, setPayrollRecords] = useState<PayrollRecord[]>(initialPayrollRecords || []);
+
+  useEffect(() => {
+    setPayrollRecords(initialPayrollRecords || []);
+  }, [initialPayrollRecords]);
+
+  // Payroll Filter States
+  const [payrollFilterEmployeeId, setPayrollFilterEmployeeId] = useState("");
+  const [payrollFilterDate, setPayrollFilterDate] = useState("");
 
   // Last Login Persistence States
   const [lastLoginCode, setLastLoginCode] = useState<string | null>(null);
@@ -423,12 +547,32 @@ export default function HRMSPortal({
 
     try {
       if (editingEmployeeId) {
-        const res = await editEmployeeAction(editingEmployeeId, empFormName, empFormCode, empFormDept, empFormDesg, empFormPassword, empFormPhoto);
+        const res = await editEmployeeAction(
+          editingEmployeeId,
+          empFormName,
+          empFormCode,
+          empFormDept,
+          empFormDesg,
+          empFormPassword,
+          empFormPhoto,
+          empFormPayType,
+          Number(empFormPayRate) || 0,
+          empFormCheckInTime,
+          empFormCheckOutTime,
+          empFormEmploymentType,
+          Number(empFormBreakTime) || 60
+        );
         if (res.success) {
           setEmpFormName("");
           setEmpFormCode("");
           setEmpFormPassword("");
           setEmpFormPhoto("");
+          setEmpFormPayType("Monthly");
+          setEmpFormPayRate("");
+          setEmpFormCheckInTime("09:00");
+          setEmpFormCheckOutTime("18:00");
+          setEmpFormEmploymentType("Full-Time");
+          setEmpFormBreakTime(60);
           setEditingEmployeeId(null);
           showToast(`Employee "${empFormName}" updated successfully!`, "success");
           window.location.reload();
@@ -436,12 +580,31 @@ export default function HRMSPortal({
           showToast(res.error || "Failed to update employee.", "error");
         }
       } else {
-        const res = await addEmployeeAction(empFormName, empFormCode, empFormDept, empFormDesg, empFormPassword, empFormPhoto);
+        const res = await addEmployeeAction(
+          empFormName,
+          empFormCode,
+          empFormDept,
+          empFormDesg,
+          empFormPassword,
+          empFormPhoto,
+          empFormPayType,
+          Number(empFormPayRate) || 0,
+          empFormCheckInTime,
+          empFormCheckOutTime,
+          empFormEmploymentType,
+          Number(empFormBreakTime) || 60
+        );
         if (res.success) {
           setEmpFormName("");
           setEmpFormCode("");
           setEmpFormPassword("");
           setEmpFormPhoto("");
+          setEmpFormPayType("Monthly");
+          setEmpFormPayRate("");
+          setEmpFormCheckInTime("09:00");
+          setEmpFormCheckOutTime("18:00");
+          setEmpFormEmploymentType("Full-Time");
+          setEmpFormBreakTime(60);
           showToast(`Employee "${empFormName}" registered successfully!`, "success");
           window.location.reload();
         } else {
@@ -474,6 +637,126 @@ export default function HRMSPortal({
     } catch (err) {
       console.error(err);
       showToast("An unexpected error occurred while deleting.", "error");
+    }
+  };
+
+  const handleCreateEmploymentType = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newEtName.trim() || isSavingEt) return;
+    setIsSavingEt(true);
+    try {
+      const hours = Number(newEtHours) || 8.0;
+      const breakThreshold = Number(newEtBreakThreshold) || 5.0;
+      const res = editingEtId
+        ? await editEmploymentTypeAction(editingEtId, newEtName, hours, breakThreshold)
+        : await addEmploymentTypeAction(newEtName, hours, breakThreshold);
+      if (res.success) {
+        showToast(`Employment type "${newEtName}" ${editingEtId ? "updated" : "created"} successfully!`, "success");
+        setNewEtName("");
+        setNewEtHours(8);
+        setNewEtBreakThreshold(5);
+        setEditingEtId(null);
+        window.location.reload();
+      } else {
+        showToast(res.error || `Failed to ${editingEtId ? "update" : "create"} employment type.`, "error");
+      }
+    } catch (err: any) {
+      showToast(err.message || "An error occurred.", "error");
+    } finally {
+      setIsSavingEt(false);
+    }
+  };
+
+  const handleDeleteEmploymentType = async (etId: string, etName: string) => {
+    if (!window.confirm(`Are you sure you want to delete employment type "${etName}"?`)) return;
+    try {
+      const res = await deleteEmploymentTypeAction(etId);
+      if (res.success) {
+        showToast(`Employment type "${etName}" deleted successfully!`, "success");
+        window.location.reload();
+      } else {
+        showToast(res.error || "Failed to delete employment type.", "error");
+      }
+    } catch (err: any) {
+      showToast(err.message || "An error occurred.", "error");
+    }
+  };
+
+  const handleCreateDepartment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDeptName.trim() || isSavingDept) return;
+    setIsSavingDept(true);
+    try {
+      const res = editingDeptId
+        ? await editDepartmentAction(editingDeptId, newDeptName)
+        : await addDepartmentAction(newDeptName);
+      if (res.success) {
+        showToast(`Department "${newDeptName}" ${editingDeptId ? "updated" : "created"} successfully!`, "success");
+        setNewDeptName("");
+        setEditingDeptId(null);
+        window.location.reload();
+      } else {
+        showToast(res.error || `Failed to ${editingDeptId ? "update" : "create"} department.`, "error");
+      }
+    } catch (err: any) {
+      showToast(err.message || "An error occurred.", "error");
+    } finally {
+      setIsSavingDept(false);
+    }
+  };
+
+  const handleDeleteDepartment = async (deptId: string, deptName: string) => {
+    if (!window.confirm(`Are you sure you want to delete department "${deptName}"?`)) return;
+    try {
+      const res = await deleteDepartmentAction(deptId);
+      if (res.success) {
+        showToast(`Department "${deptName}" deleted successfully!`, "success");
+        window.location.reload();
+      } else {
+        showToast(res.error || "Failed to delete department.", "error");
+      }
+    } catch (err: any) {
+      showToast(err.message || "An error occurred.", "error");
+    }
+  };
+
+  const handleCreatePayStructure = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPsName.trim() || isSavingPs) return;
+    setIsSavingPs(true);
+    try {
+      const days = Number(newPsDays) || 0;
+      const res = editingPsId
+        ? await editPayStructureAction(editingPsId, newPsName, days)
+        : await addPayStructureAction(newPsName, days);
+      if (res.success) {
+        showToast(`Pay structure "${newPsName}" ${editingPsId ? "updated" : "created"} successfully!`, "success");
+        setNewPsName("");
+        setNewPsDays(26);
+        setEditingPsId(null);
+        window.location.reload();
+      } else {
+        showToast(res.error || `Failed to ${editingPsId ? "update" : "create"} pay structure.`, "error");
+      }
+    } catch (err: any) {
+      showToast(err.message || "An error occurred.", "error");
+    } finally {
+      setIsSavingPs(false);
+    }
+  };
+
+  const handleDeletePayStructure = async (psId: string, psName: string) => {
+    if (!window.confirm(`Are you sure you want to delete pay structure "${psName}"?`)) return;
+    try {
+      const res = await deletePayStructureAction(psId);
+      if (res.success) {
+        showToast(`Pay structure "${psName}" deleted successfully!`, "success");
+        window.location.reload();
+      } else {
+        showToast(res.error || "Failed to delete pay structure.", "error");
+      }
+    } catch (err: any) {
+      showToast(err.message || "An error occurred.", "error");
     }
   };
 
@@ -710,6 +993,153 @@ export default function HRMSPortal({
     if (m[3].toUpperCase() === "PM" && h < 12) h += 12;
     if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
     return h * 3600 + min * 60;
+  };
+
+  const calculateHoursFromAttendance = (checkIn?: string, checkOut?: string): number => {
+    if (!checkIn || !checkOut) return 0;
+    const inSec = parseTimeSec(checkIn);
+    if (inSec === null) return 0;
+    const outSec = parseTimeSec(checkOut);
+    if (outSec === null) return 0;
+    const diffSec = outSec - inSec;
+    return Math.max(0, parseFloat((diffSec / 3600).toFixed(2)));
+  };
+
+  const calculateEmpPayDetails = useCallback((emp: Employee) => {
+    const empLogs = attendance.filter(a => a.employeeId === emp.id);
+
+    // Unpaid logs: date/timestamp after emp.lastPaidAt
+    const unpaidLogs = empLogs.filter(a => {
+      if (!emp.lastPaidAt) return true;
+      const logDate = a.date;
+      const lastPaidDate = emp.lastPaidAt.split('T')[0];
+      return logDate > lastPaidDate;
+    });
+
+    const logsByDate: Record<string, typeof attendance> = {};
+    unpaidLogs.forEach(l => {
+      if (!logsByDate[l.date]) logsByDate[l.date] = [];
+      logsByDate[l.date].push(l);
+    });
+
+    const uniqueDates = Object.keys(logsByDate).sort();
+    const workedDaysCount = uniqueDates.length;
+
+    const etConfig = employmentTypes.find(et => et.name === emp.employmentType);
+    const standardLimit = etConfig ? etConfig.standardHours : (emp.employmentType === "Part-Time" ? 4 : 8);
+    const breakTriggerLimit = etConfig ? etConfig.minHoursForBreak : 5.0;
+
+    let totalGrossHours = 0;
+    let totalLunchDeductions = 0;
+    let totalRegularHours = 0;
+    let totalOvertimeHours = 0;
+
+    uniqueDates.forEach(d => {
+      const dayLogs = logsByDate[d];
+      let dayGross = 0;
+      dayLogs.forEach(l => {
+        dayGross += calculateHoursFromAttendance(l.checkIn, l.checkOut);
+      });
+
+      if (dayGross > 0) {
+        // Exclude custom break time per worked day only if worked breakTriggerLimit hours or more
+        const breakMins = emp.breakTime !== undefined ? Number(emp.breakTime) : 60;
+        const breakHours = breakMins / 60;
+        const lunchDeduction = dayGross >= breakTriggerLimit ? Math.min(dayGross, breakHours) : 0;
+        
+        const dayNet = Math.max(0, dayGross - lunchDeduction);
+        
+        const regularHours = Math.min(dayNet, standardLimit);
+        const overtimeHours = Math.max(0, dayNet - standardLimit);
+
+        totalGrossHours += dayGross;
+        totalLunchDeductions += lunchDeduction;
+        totalRegularHours += regularHours;
+        totalOvertimeHours += overtimeHours;
+      }
+    });
+
+    const totalNetHours = Math.max(0, parseFloat((totalGrossHours - totalLunchDeductions).toFixed(2)));
+
+    const payType = emp.payType || "Monthly";
+    const payRate = Number(emp.payRate) || 0;
+
+    const psConfig = payStructures.find(ps => ps.name === payType);
+    let effectiveHourlyRate = 0;
+    if (psConfig) {
+      if (psConfig.daysPerPeriod <= 0) {
+        effectiveHourlyRate = payRate;
+      } else {
+        effectiveHourlyRate = payRate > 0 ? payRate / (psConfig.daysPerPeriod * standardLimit) : 0;
+      }
+    } else {
+      if (payType === "Hourly") {
+        effectiveHourlyRate = payRate;
+      } else if (payType === "Weekly") {
+        effectiveHourlyRate = payRate > 0 ? payRate / (6 * standardLimit) : 0;
+      } else {
+        effectiveHourlyRate = payRate > 0 ? payRate / (26 * standardLimit) : 0;
+      }
+    }
+
+    const pendingAmount = parseFloat((totalNetHours * effectiveHourlyRate).toFixed(2));
+    const periodStart = uniqueDates[0] || getLocalTodayString();
+    const periodEnd = uniqueDates[uniqueDates.length - 1] || getLocalTodayString();
+
+    return {
+      workedDaysCount,
+      totalGrossHours: parseFloat(totalGrossHours.toFixed(2)),
+      totalLunchDeductions: parseFloat(totalLunchDeductions.toFixed(2)),
+      totalNetHours,
+      totalRegularHours: parseFloat(totalRegularHours.toFixed(2)),
+      totalOvertimeHours: parseFloat(totalOvertimeHours.toFixed(2)),
+      payType,
+      payRate,
+      effectiveHourlyRate: parseFloat(effectiveHourlyRate.toFixed(2)),
+      pendingAmount,
+      periodStart,
+      periodEnd
+    };
+  }, [attendance]);
+
+  const handleProcessPayment = async () => {
+    if (!selectedPayEmp || isProcessingPayment) return;
+    const emp = selectedPayEmp;
+    const calc = calculateEmpPayDetails(emp);
+
+    if (calc.pendingAmount <= 0) {
+      showToast("No pending balance to pay for this staff member.", "info");
+      return;
+    }
+
+    setIsProcessingPayment(true);
+    try {
+      const res = await processPayrollPaymentAction(
+        emp.id,
+        calc.pendingAmount,
+        calc.totalNetHours,
+        calc.totalGrossHours,
+        calc.totalLunchDeductions,
+        calc.periodStart,
+        calc.periodEnd,
+        payModalNotes
+      );
+
+      if (res.success && res.payrollRecord) {
+        showToast(`Payment of ₹${calc.pendingAmount.toLocaleString('en-IN')} for ${emp.name} completed successfully!`, "success");
+        setPayrollRecords(prev => [res.payrollRecord, ...prev]);
+        setSelectedPayEmp(null);
+        setPayModalNotes("");
+        window.location.reload();
+      } else {
+        showToast(res.error || "Failed to process payment.", "error");
+      }
+    } catch (err: any) {
+      console.error("Payment Exception:", err);
+      showToast(err?.message || "An error occurred while processing payment.", "error");
+    } finally {
+      setIsProcessingPayment(false);
+    }
   };
 
   // Total effective milliseconds worked today (recomputes every second via liveTime)
@@ -949,7 +1379,9 @@ export default function HRMSPortal({
               {([
                 { id: "status", label: "Attendance", icon: ClipboardList },
                 { id: "logs", label: "Ledger", icon: Clock },
-                { id: "roster", label: "Staff", icon: Users }
+                { id: "roster", label: "Staff", icon: Users },
+                { id: "payroll", label: "Payroll", icon: Banknote },
+                { id: "settings", label: "Settings", icon: Settings }
               ] as const).map(tab => {
                 const Icon = tab.icon;
                 const isActive = adminTab === tab.id;
@@ -1452,14 +1884,13 @@ export default function HRMSPortal({
                             <select 
                               value={empFormDept} 
                               onChange={e => setEmpFormDept(e.target.value)} 
-                              className="w-full h-10 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 pr-8 focus:outline-none focus:border-amber-500 transition-colors font-bold text-zinc-700 dark:text-zinc-350 cursor-pointer appearance-none"
+                              className="w-full h-10 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 pr-8 focus:outline-none focus:border-amber-500 transition-colors font-bold text-zinc-700 dark:text-zinc-355 cursor-pointer appearance-none"
                             >
-                              <option value="Stitching Section">Stitching</option>
-                              <option value="Quality Assurance">Quality QA</option>
-                              <option value="Cutting Department">Cutting</option>
-                              <option value="Finishing Section">Finishing</option>
-                              <option value="House Keeping">House Keeping</option>
-                              <option value="Others">Others</option>
+                              {departments.map(d => (
+                                <option key={d.id} value={d.name}>
+                                  {d.name}
+                                </option>
+                              ))}
                             </select>
                             <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-450 pointer-events-none">
                               <ChevronDown className="h-4 w-4" />
@@ -1474,6 +1905,98 @@ export default function HRMSPortal({
                             value={empFormDesg} 
                             onChange={e => setEmpFormDesg(e.target.value)} 
                             className="w-full h-10 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-805 rounded-xl px-3 focus:outline-none focus:border-amber-500 transition-colors font-semibold" 
+                          />
+                        </div>
+                      </div>
+
+                      {/* Employment Type & Break Time */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Employment Type</label>
+                          <div className="relative">
+                            <select
+                              value={empFormEmploymentType}
+                              onChange={e => setEmpFormEmploymentType(e.target.value)}
+                              className="w-full h-10 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 pr-8 focus:outline-none focus:border-amber-500 transition-colors font-bold text-zinc-700 dark:text-zinc-350 cursor-pointer appearance-none"
+                            >
+                              {employmentTypes.map(et => (
+                                <option key={et.id} value={et.name}>
+                                  {et.name} ({et.standardHours}h)
+                                </option>
+                              ))}
+                            </select>
+                            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-450 pointer-events-none">
+                              <ChevronDown className="h-4 w-4" />
+                            </span>
+                          </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Break Time (Mins)</label>
+                          <input
+                            type="number"
+                            required
+                            placeholder="60"
+                            value={empFormBreakTime}
+                            onChange={e => setEmpFormBreakTime(e.target.value)}
+                            className="w-full h-10 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-805 rounded-xl px-3 focus:outline-none focus:border-amber-500 transition-colors font-semibold"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Shift Timings */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Check-In Time</label>
+                          <input
+                            type="time"
+                            required
+                            value={empFormCheckInTime}
+                            onChange={e => setEmpFormCheckInTime(e.target.value)}
+                            className="w-full h-10 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-805 rounded-xl px-3 focus:outline-none focus:border-amber-500 transition-colors font-semibold"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Check-Out Time</label>
+                          <input
+                            type="time"
+                            required
+                            value={empFormCheckOutTime}
+                            onChange={e => setEmpFormCheckOutTime(e.target.value)}
+                            className="w-full h-10 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-850 rounded-xl px-3 focus:outline-none focus:border-amber-500 transition-colors font-semibold"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Pay Structure & Pay Rate */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Pay Structure</label>
+                          <div className="relative">
+                            <select
+                              value={empFormPayType}
+                              onChange={e => setEmpFormPayType(e.target.value)}
+                              className="w-full h-10 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 pr-8 focus:outline-none focus:border-amber-500 transition-colors font-bold text-zinc-700 dark:text-zinc-355 cursor-pointer appearance-none"
+                            >
+                              {payStructures.map(ps => (
+                                <option key={ps.id} value={ps.name}>
+                                  {ps.name} {ps.daysPerPeriod > 0 ? `(${ps.daysPerPeriod}d)` : "(Hourly)"}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-450 pointer-events-none">
+                              <ChevronDown className="h-4 w-4" />
+                            </span>
+                          </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Rate (₹)</label>
+                          <input
+                            type="number"
+                            required
+                            placeholder="E.g., 15000"
+                            value={empFormPayRate}
+                            onChange={e => setEmpFormPayRate(e.target.value)}
+                            className="w-full h-10 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-805 rounded-xl px-3 focus:outline-none focus:border-amber-500 transition-colors font-semibold"
                           />
                         </div>
                       </div>
@@ -1500,6 +2023,12 @@ export default function HRMSPortal({
                             setEmpFormPhoto("");
                             setEmpFormDept("Stitching Section");
                             setEmpFormDesg("");
+                            setEmpFormPayType("Monthly");
+                            setEmpFormPayRate("");
+                            setEmpFormCheckInTime("09:00");
+                            setEmpFormCheckOutTime("18:00");
+                            setEmpFormEmploymentType("Full-Time");
+                            setEmpFormBreakTime(60);
                           }}
                           className="px-3.5 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 text-zinc-500 dark:text-zinc-400 font-bold h-10 rounded-xl text-xs cursor-pointer transition-all uppercase tracking-wide flex items-center justify-center shadow-xs"
                         >
@@ -1569,6 +2098,12 @@ export default function HRMSPortal({
                                       setEmpFormDesg(emp.designation);
                                       setEmpFormPassword(""); // Leave empty for password override placeholder
                                       setEmpFormPhoto(emp.profilePhoto || "");
+                                      setEmpFormPayType(emp.payType || "Monthly");
+                                      setEmpFormPayRate(emp.payRate !== undefined ? emp.payRate : "");
+                                      setEmpFormCheckInTime(emp.checkInTime || "09:00");
+                                      setEmpFormCheckOutTime(emp.checkOutTime || "18:00");
+                                      setEmpFormEmploymentType(emp.employmentType || "Full-Time");
+                                      setEmpFormBreakTime(emp.breakTime !== undefined ? emp.breakTime : 60);
                                       window.scrollTo({ top: 0, behavior: 'smooth' });
                                     }}
                                     className="inline-flex items-center justify-center p-1.5 sm:p-2 text-zinc-505 hover:text-zinc-800 dark:hover:text-zinc-200 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-350 bg-white dark:bg-zinc-900 rounded-lg cursor-pointer transition-all shadow-xs"
@@ -1597,6 +2132,695 @@ export default function HRMSPortal({
                   </div>
                 </div>
 
+              </div>
+            )}
+
+            {/* Admin TAB: Payroll Management */}
+            {adminTab === "payroll" && (
+              <div className="space-y-4 animate-in fade-in duration-200">
+                {/* Payroll Calculator Card Directory */}
+                <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 space-y-3.5 shadow-xs">
+                  <div className="flex justify-between items-center pb-2 border-b border-zinc-150 dark:border-zinc-800">
+                    <h3 className="font-bold text-sm text-zinc-900 dark:text-zinc-105 flex items-center gap-2">
+                      <Banknote className="h-4 w-4 text-amber-500" /> Pending Payroll Calculator
+                    </h3>
+                    <span className="text-[10px] font-mono text-zinc-400">Real-Time Accruals</span>
+                  </div>
+
+                  {employees.length === 0 ? (
+                    <div className="p-8 text-center text-zinc-400 italic text-xs border border-dashed border-zinc-200 dark:border-zinc-800">
+                      No registered staff members found.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {employees.map(emp => {
+                        const calc = calculateEmpPayDetails(emp);
+                        return (
+                          <div 
+                            key={emp.id}
+                            className="border border-zinc-200 dark:border-zinc-800 p-3.5 space-y-3 flex flex-col justify-between hover:border-zinc-350 dark:hover:border-zinc-700 transition-colors"
+                          >
+                            <div className="flex justify-between items-start gap-2">
+                              <div className="flex items-center gap-2.5">
+                                {emp.profilePhoto ? (
+                                  <img src={emp.profilePhoto} alt={emp.name} className="h-9 w-9 object-cover border border-zinc-200 dark:border-zinc-800" />
+                                ) : (
+                                  <div className={`h-9 w-9 bg-gradient-to-br ${getAvatarBg(emp.name)} text-white flex items-center justify-center font-bold text-xs`}>
+                                    {getInitials(emp.name)}
+                                  </div>
+                                )}
+                                <div className="text-left">
+                                  <p className="font-bold text-zinc-900 dark:text-zinc-105 leading-none">{emp.name}</p>
+                                  <p className="text-[9px] text-zinc-405 font-mono mt-1.5 uppercase font-bold">{emp.code} · {emp.department}</p>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <span className="font-mono font-black text-xs text-amber-600 dark:text-amber-505">
+                                  ₹{calc.pendingAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                </span>
+                                <span className="block text-[8px] text-zinc-400 uppercase font-bold font-sans mt-1">Pending</span>
+                              </div>
+                            </div>
+
+                            {/* Worked Breakdown */}
+                            <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-[10px] font-mono bg-white dark:bg-zinc-900 p-2.5 border border-zinc-200/80 dark:border-zinc-800">
+                              <div>
+                                <span className="text-zinc-400 block text-[9px] uppercase font-sans">Worked Days</span>
+                                <span className="font-bold text-zinc-800 dark:text-zinc-200">{calc.workedDaysCount} Days</span>
+                              </div>
+                              <div>
+                                <span className="text-zinc-400 block text-[9px] uppercase font-sans">Gross Hours</span>
+                                <span className="font-bold text-zinc-800 dark:text-zinc-200">{calc.totalGrossHours} hr</span>
+                              </div>
+                              <div>
+                                <span className="text-zinc-400 block text-[9px] uppercase font-sans">Break Excl.</span>
+                                <span className="font-bold text-red-500">-{calc.totalLunchDeductions} hr</span>
+                              </div>
+                              <div>
+                                <span className="text-zinc-400 block text-[9px] uppercase font-sans">Regular Hours</span>
+                                <span className="font-bold text-zinc-800 dark:text-zinc-200">{calc.totalRegularHours} hr</span>
+                              </div>
+                              <div>
+                                <span className="text-zinc-400 block text-[9px] uppercase font-sans">Overtime</span>
+                                <span className="font-bold text-amber-600 dark:text-amber-505">+{calc.totalOvertimeHours} hr</span>
+                              </div>
+                              <div>
+                                <span className="text-zinc-400 block text-[9px] uppercase font-sans">Net Paid Hours</span>
+                                <span className="font-bold text-emerald-600 dark:text-emerald-400">{calc.totalNetHours} hr</span>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => setSelectedPayEmp(emp)}
+                              disabled={calc.pendingAmount <= 0}
+                              className={`w-full py-2 px-3 font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-2xs ${
+                                calc.pendingAmount > 0
+                                  ? "bg-amber-500 hover:bg-amber-600 text-black cursor-pointer active:scale-98"
+                                  : "bg-zinc-200 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                              }`}
+                            >
+                              <Banknote className="h-4 w-4" />
+                              {calc.pendingAmount > 0 ? `Process Payout (₹${calc.pendingAmount.toLocaleString('en-IN')})` : "Fully Paid (₹0.00)"}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Payroll History Log Table */}
+                <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 space-y-3.5 shadow-xs text-left">
+                  <div className="flex justify-between items-center pb-2 border-b border-zinc-150 dark:border-zinc-800">
+                    <h3 className="font-bold text-sm text-zinc-900 dark:text-zinc-101 flex items-center gap-2">
+                      <History className="h-4 w-4 text-emerald-505" /> Historical Payout Transactions Log
+                    </h3>
+                    <span className="text-[10px] font-mono text-zinc-400">{payrollRecords.length} Completed Payouts</span>
+                  </div>
+
+                  {/* Filters Row */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-zinc-50 dark:bg-zinc-955/40 p-3 border border-zinc-200 dark:border-zinc-800 text-xs text-left">
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-zinc-450 dark:text-zinc-550 block">Filter by Staff</label>
+                      <div className="relative">
+                        <select
+                          value={payrollFilterEmployeeId}
+                          onChange={e => setPayrollFilterEmployeeId(e.target.value)}
+                          className="w-full h-9 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 pr-8 focus:outline-none focus:border-amber-500 font-bold text-zinc-700 dark:text-zinc-355 cursor-pointer appearance-none"
+                        >
+                          <option value="">All Staff</option>
+                          {employees.map(emp => (
+                            <option key={emp.id} value={emp.id}>
+                              {emp.name} ({emp.code})
+                            </option>
+                          ))}
+                        </select>
+                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-455 pointer-events-none">
+                          <ChevronDown className="h-4 w-4" />
+                        </span>
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] uppercase font-bold text-zinc-455 dark:text-zinc-500 block">Filter by Date</label>
+                      <div className="relative flex items-center">
+                        <input
+                          type="date"
+                          value={payrollFilterDate}
+                          onChange={e => setPayrollFilterDate(e.target.value)}
+                          className="w-full h-9 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 focus:outline-none focus:border-amber-500 font-semibold"
+                        />
+                        {payrollFilterDate && (
+                          <button
+                            onClick={() => setPayrollFilterDate("")}
+                            className="absolute right-2.5 text-zinc-450 hover:text-zinc-650 cursor-pointer text-xs font-bold focus:outline-none"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {(() => {
+                    const filteredRecords = payrollRecords.filter(pr => {
+                      if (payrollFilterEmployeeId && pr.employeeId !== payrollFilterEmployeeId) return false;
+                      if (payrollFilterDate) {
+                        const recordDate = pr.paidAt ? pr.paidAt.split('T')[0] : '';
+                        if (recordDate !== payrollFilterDate) return false;
+                      }
+                      return true;
+                    });
+
+                    if (filteredRecords.length === 0) {
+                      return (
+                        <div className="p-8 text-center text-zinc-400 italic text-xs border border-dashed border-zinc-200 dark:border-zinc-800">
+                          {payrollRecords.length === 0 
+                            ? "No payout transactions recorded yet. Once staff members are paid, completed records will be logged here."
+                            : "No payouts match the filter criteria."}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse font-sans text-xs">
+                          <thead>
+                            <tr className="bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 text-[10px] font-black uppercase tracking-wider text-zinc-400">
+                              <th className="p-2.5">Date Paid</th>
+                              <th className="p-2.5">Staff Member</th>
+                              <th className="p-2.5">Pay Structure</th>
+                              <th className="p-2.5">Gross / Net Hours</th>
+                              <th className="p-2.5">Paid Amount</th>
+                              <th className="p-2.5">Notes</th>
+                              <th className="p-2.5 text-right">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+                            {filteredRecords.map(pr => {
+                              const emp = pr.employee || employees.find(e => e.id === pr.employeeId);
+                              const paidDateFormatted = pr.paidAt ? new Date(pr.paidAt).toLocaleDateString("en-US", {
+                                month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit"
+                              }) : pr.periodEnd;
+
+                              return (
+                                <tr key={pr.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30">
+                                  <td className="p-2.5 font-mono text-[10px] text-zinc-505 dark:text-zinc-400 whitespace-nowrap">
+                                    {paidDateFormatted}
+                                  </td>
+                                  <td className="p-2.5 font-bold text-zinc-900 dark:text-zinc-105">
+                                    <div className="flex items-center gap-2">
+                                      {emp?.profilePhoto ? (
+                                        <img src={emp.profilePhoto} alt={emp.name} className="h-6 w-6 object-cover border border-zinc-200 dark:border-zinc-800" />
+                                      ) : (
+                                        <div className={`h-6 w-6 bg-gradient-to-br ${getAvatarBg(emp?.name || "")} text-white flex items-center justify-center font-bold text-[9px]`}>
+                                          {getInitials(emp?.name || "")}
+                                        </div>
+                                      )}
+                                      <span>{emp?.name || pr.employeeId} <span className="text-[9px] text-zinc-400 font-mono">({emp?.code})</span></span>
+                                    </div>
+                                  </td>
+                                  <td className="p-2.5 font-mono text-[10px] text-zinc-600 dark:text-zinc-350">
+                                    {pr.payType}: ₹{pr.payRate}
+                                  </td>
+                                  <td className="p-2.5 font-mono text-[10px] text-zinc-550 dark:text-zinc-400">
+                                    {pr.grossHours}h / <strong className="text-zinc-700 dark:text-zinc-300">{pr.netHours}h</strong>
+                                  </td>
+                                  <td className="p-2.5 font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                    ₹{pr.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                  </td>
+                                  <td className="p-2.5 text-[10px] text-zinc-500 dark:text-zinc-400 max-w-xs truncate">
+                                    {pr.notes || "—"}
+                                  </td>
+                                  <td className="p-2.5 text-right">
+                                    <span className="inline-flex px-2 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[9px] font-bold uppercase">
+                                      Paid
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {/* Process Payment Confirmation Modal */}
+            {selectedPayEmp && (() => {
+              const emp = selectedPayEmp;
+              const calc = calculateEmpPayDetails(emp);
+
+              return (
+                <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+                  <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 max-w-md w-full space-y-4 shadow-xl text-left animate-in zoom-in-95 duration-150">
+                    <div className="flex justify-between items-center pb-2 border-b border-zinc-150 dark:border-zinc-800">
+                      <h4 className="font-bold text-sm text-zinc-900 dark:text-zinc-101 flex items-center gap-2">
+                        <Banknote className="h-4 w-4 text-amber-500" /> Confirm Salary Payout
+                      </h4>
+                      <button 
+                        type="button" 
+                        onClick={() => setSelectedPayEmp(null)}
+                        className="text-zinc-405 hover:text-zinc-650 dark:hover:text-zinc-200 text-sm font-bold cursor-pointer font-sans"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    <div className="space-y-3 text-xs">
+                      <div className="bg-zinc-50 dark:bg-zinc-955 p-3 border border-zinc-200 dark:border-zinc-800 flex items-center gap-3">
+                        {emp.profilePhoto ? (
+                          <img src={emp.profilePhoto} alt={emp.name} className="h-10 w-10 object-cover border border-zinc-200 dark:border-zinc-800 shrink-0" />
+                        ) : (
+                          <div className={`h-10 w-10 bg-gradient-to-br ${getAvatarBg(emp.name)} text-white flex items-center justify-center font-bold text-xs shrink-0`}>
+                            {getInitials(emp.name)}
+                          </div>
+                        )}
+                        <div>
+                          <p className="font-bold text-sm text-zinc-900 dark:text-zinc-50">{emp.name}</p>
+                          <p className="text-[10px] text-zinc-400 uppercase font-bold">{emp.code} · {emp.department}</p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5 font-mono text-[11px] bg-amber-500/5 border border-amber-500/20 p-3 text-amber-800 dark:text-amber-300">
+                        <div className="flex justify-between">
+                          <span className="font-sans text-zinc-500">Pay Structure:</span>
+                          <span className="font-bold">{calc.payType} (₹{calc.payRate.toLocaleString('en-IN')})</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="font-sans text-zinc-500">Worked Period:</span>
+                          <span>{calc.periodStart} to {calc.periodEnd} ({calc.workedDaysCount} days)</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="font-sans text-zinc-500">Gross Hours:</span>
+                          <span>{calc.totalGrossHours} hrs</span>
+                        </div>
+                        <div className="flex justify-between text-red-500">
+                          <span className="font-sans text-zinc-500">Break Exclusion:</span>
+                          <span>-{calc.totalLunchDeductions} hrs ({emp.breakTime || 60} mins/day)</span>
+                        </div>
+                        <div className="flex justify-between text-zinc-650 dark:text-zinc-400">
+                          <span className="font-sans">Regular Hours:</span>
+                          <span>{calc.totalRegularHours} hrs</span>
+                        </div>
+                        <div className="flex justify-between text-amber-600 dark:text-amber-500 font-semibold">
+                          <span className="font-sans">Overtime Hours:</span>
+                          <span>+{calc.totalOvertimeHours} hrs</span>
+                        </div>
+                        <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-bold border-t border-amber-500/20 pt-1 mt-1">
+                          <span className="font-sans">Net Paid Hours:</span>
+                          <span>{calc.totalNetHours} hrs</span>
+                        </div>
+                        <div className="flex justify-between text-amber-600 dark:text-amber-400 font-black text-sm border-t border-amber-500/30 pt-1 mt-1">
+                          <span className="font-sans">Total Amount Payable:</span>
+                          <span>₹{calc.pendingAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] uppercase font-bold text-zinc-400">Transaction Notes (Optional)</label>
+                        <input
+                          type="text"
+                          placeholder="E.g., Weekly salary settlement via UPI / Cash"
+                          value={payModalNotes}
+                          onChange={e => setPayModalNotes(e.target.value)}
+                          className="w-full h-9 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-3 font-medium text-xs focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2 pt-2 border-t border-zinc-150 dark:border-zinc-800">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPayEmp(null)}
+                        className="flex-1 py-2 border border-zinc-200 dark:border-zinc-800 font-bold text-xs uppercase text-zinc-505 hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleProcessPayment}
+                        disabled={isProcessingPayment}
+                        className="flex-1 py-2 bg-amber-500 hover:bg-amber-600 font-bold text-xs uppercase text-black flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                      >
+                        {isProcessingPayment && (
+                          <span className="h-3.5 w-3.5 border-2 border-black border-t-transparent rounded-full animate-spin"></span>
+                        )}
+                        {isProcessingPayment ? "Processing..." : `Confirm & Pay ₹${calc.pendingAmount.toLocaleString('en-IN')}`}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Admin TAB: Settings */}
+            {adminTab === "settings" && (
+              <div className="space-y-8 text-left animate-in fade-in duration-200">
+                {/* Section 1: Employment Types */}
+                <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-2xl p-5 space-y-4 shadow-xs">
+                  <h3 className="font-bold text-sm text-zinc-900 dark:text-white uppercase tracking-wider pb-2 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-2">
+                    <Users className="h-4 w-4 text-amber-500" /> Configure Employment Types
+                  </h3>
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                    {/* Form */}
+                    <div className="lg:col-span-1 bg-zinc-50/50 dark:bg-zinc-955/20 p-4 border border-zinc-100 dark:border-zinc-850 rounded-xl space-y-3.5">
+                      <p className="font-bold text-[11px] text-zinc-500 uppercase tracking-wide">
+                        {editingEtId ? "Update Employment Type" : "Add Custom Type"}
+                      </p>
+                      <form onSubmit={handleCreateEmploymentType} className="space-y-3 pt-1 text-xs">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Type Name</label>
+                          <input
+                            required
+                            type="text"
+                            placeholder="E.g. Half-Time"
+                            value={newEtName}
+                            onChange={e => setNewEtName(e.target.value)}
+                            className="w-full h-10 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 focus:outline-none focus:border-amber-500 transition-colors font-semibold"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Standard Shift Hours</label>
+                          <input
+                            required
+                            type="number"
+                            step="0.5"
+                            min="1"
+                            max="24"
+                            placeholder="8.0"
+                            value={newEtHours}
+                            onChange={e => setNewEtHours(e.target.value)}
+                            className="w-full h-10 bg-white dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-805 rounded-xl px-3 focus:outline-none focus:border-amber-500 transition-colors font-semibold"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Break Trigger (Hours)</label>
+                          <input
+                            required
+                            type="number"
+                            step="0.5"
+                            min="1"
+                            max="24"
+                            placeholder="5.0"
+                            value={newEtBreakThreshold}
+                            onChange={e => setNewEtBreakThreshold(e.target.value)}
+                            className="w-full h-10 bg-white dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-805 rounded-xl px-3 focus:outline-none focus:border-amber-500 transition-colors font-semibold"
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="submit"
+                            disabled={isSavingEt}
+                            className="flex-1 bg-gradient-to-r from-zinc-900 to-zinc-800 dark:from-zinc-100 dark:to-zinc-200 dark:text-zinc-950 text-white font-bold h-9 rounded-xl text-xs cursor-pointer transition-all uppercase tracking-wide flex items-center justify-center gap-1.5 shadow-xs"
+                          >
+                            {isSavingEt && <span className="h-3.5 w-3.5 border-2 border-white dark:border-zinc-900 border-t-transparent rounded-full animate-spin"></span>}
+                            {isSavingEt ? "Saving..." : editingEtId ? "Update" : "Add"}
+                          </button>
+                          {editingEtId && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingEtId(null);
+                                setNewEtName("");
+                                setNewEtHours(8);
+                                setNewEtBreakThreshold(5);
+                              }}
+                              className="px-3 border border-zinc-200 dark:border-zinc-800 text-zinc-500 font-bold h-9 rounded-xl text-xs cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors uppercase"
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </div>
+                      </form>
+                    </div>
+                    {/* Table */}
+                    <div className="lg:col-span-2 overflow-x-auto border border-zinc-100 dark:border-zinc-850 rounded-xl">
+                      <table className="w-full text-left border-collapse font-sans text-xs">
+                        <thead>
+                          <tr className="bg-zinc-50 dark:bg-zinc-955 border-b border-zinc-150 dark:border-zinc-800 text-zinc-405 dark:text-zinc-500 font-bold uppercase tracking-wider text-[9px]">
+                            <th className="px-4 py-3">Type Name</th>
+                            <th className="px-4 py-3">Standard Shift Hours</th>
+                            <th className="px-4 py-3">Break Trigger Threshold</th>
+                            <th className="px-4 py-3 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/80 font-medium text-[11px] sm:text-xs">
+                          {employmentTypes.map(et => {
+                            const isCore = et.name === "Full-Time" || et.name === "Part-Time";
+                            return (
+                              <tr key={et.id} className="hover:bg-zinc-50/40 dark:hover:bg-zinc-800/20 transition-colors">
+                                <td className="px-4 py-3 font-bold text-zinc-900 dark:text-zinc-105">
+                                  {et.name} {isCore && <span className="text-[9px] uppercase bg-zinc-200 dark:bg-zinc-800 text-zinc-500 px-1.5 py-0.5 ml-1 rounded-none">Core</span>}
+                                </td>
+                                <td className="px-4 py-3 font-mono text-zinc-650 dark:text-zinc-400">{et.standardHours} hours/day</td>
+                                <td className="px-4 py-3 font-mono text-zinc-650 dark:text-zinc-400">&gt;= {et.minHoursForBreak} hours</td>
+                                <td className="px-4 py-3 text-right">
+                                  <div className="inline-flex gap-1.5 justify-end">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingEtId(et.id);
+                                        setNewEtName(et.name);
+                                        setNewEtHours(et.standardHours);
+                                        setNewEtBreakThreshold(et.minHoursForBreak);
+                                      }}
+                                      className="p-1.5 text-zinc-650 hover:text-white border border-zinc-200 dark:border-zinc-800 hover:bg-amber-500 hover:border-amber-500 rounded-lg cursor-pointer transition-all"
+                                      title="Edit"
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteEmploymentType(et.id, et.name)}
+                                      className="p-1.5 text-red-500 hover:text-white border border-red-200 dark:border-red-900/40 hover:bg-red-500 hover:border-red-500 rounded-lg cursor-pointer transition-all"
+                                      title="Delete"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Section 2: Departments */}
+                  <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-2xl p-5 space-y-4 shadow-xs">
+                    <h3 className="font-bold text-sm text-zinc-900 dark:text-white uppercase tracking-wider pb-2 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-2">
+                      <ClipboardList className="h-4 w-4 text-amber-500" /> Configure Departments
+                    </h3>
+                    <div className="space-y-4">
+                      {/* Form */}
+                      <form onSubmit={handleCreateDepartment} className="flex gap-2 text-xs">
+                        <input
+                          required
+                          type="text"
+                          placeholder="E.g. Sales Section"
+                          value={newDeptName}
+                          onChange={e => setNewDeptName(e.target.value)}
+                          className="flex-1 h-10 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 focus:outline-none focus:border-amber-500 transition-colors font-semibold"
+                        />
+                        <button
+                          type="submit"
+                          disabled={isSavingDept}
+                          className="px-4 bg-gradient-to-r from-zinc-900 to-zinc-800 dark:from-zinc-100 dark:to-zinc-200 dark:text-zinc-950 text-white font-bold h-10 rounded-xl cursor-pointer transition-all uppercase tracking-wide flex items-center justify-center gap-1.5 shadow-xs shrink-0"
+                        >
+                          {isSavingDept && <span className="h-3 w-3 border-2 border-white dark:border-zinc-900 border-t-transparent rounded-full animate-spin"></span>}
+                          {editingDeptId ? "Update" : "Add"}
+                        </button>
+                        {editingDeptId && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingDeptId(null);
+                              setNewDeptName("");
+                            }}
+                            className="px-3 border border-zinc-200 dark:border-zinc-800 text-zinc-500 font-bold h-10 rounded-xl cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors uppercase shrink-0"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </form>
+                      {/* List */}
+                      <div className="border border-zinc-100 dark:border-zinc-850 rounded-xl overflow-hidden max-h-64 overflow-y-auto">
+                        <table className="w-full text-left border-collapse font-sans text-xs">
+                          <thead>
+                            <tr className="bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-150 dark:border-zinc-800 text-zinc-405 dark:text-zinc-500 font-bold uppercase tracking-wider text-[9px]">
+                              <th className="px-4 py-3">Department Name</th>
+                              <th className="px-4 py-3 text-right">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/80 font-medium text-[11px] sm:text-xs">
+                            {departments.map(d => {
+                              const isCore = [
+                                "Stitching Section",
+                                "Quality Assurance",
+                                "Cutting Department",
+                                "Finishing Section",
+                                "House Keeping",
+                                "Others"
+                              ].includes(d.name);
+                              return (
+                                <tr key={d.id} className="hover:bg-zinc-50/40 dark:hover:bg-zinc-800/20 transition-colors">
+                                  <td className="px-4 py-2.5 font-bold text-zinc-900 dark:text-zinc-105">
+                                    {d.name} {isCore && <span className="text-[9px] uppercase bg-zinc-200 dark:bg-zinc-800 text-zinc-500 px-1.5 py-0.5 ml-1 rounded-none">Core</span>}
+                                  </td>
+                                  <td className="px-4 py-2.5 text-right">
+                                    <div className="inline-flex gap-1.5 justify-end">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingDeptId(d.id);
+                                          setNewDeptName(d.name);
+                                        }}
+                                        className="p-1.5 text-zinc-650 hover:text-white border border-zinc-200 dark:border-zinc-800 hover:bg-amber-500 hover:border-amber-500 rounded-lg cursor-pointer transition-all"
+                                        title="Edit"
+                                      >
+                                        <Pencil className="h-3.5 w-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteDepartment(d.id, d.name)}
+                                        className="p-1.5 text-red-500 hover:text-white border border-red-200 dark:border-red-900/40 hover:bg-red-550 rounded-lg cursor-pointer transition-all"
+                                        title="Delete"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section 3: Pay Structures */}
+                  <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-2xl p-5 space-y-4 shadow-xs">
+                    <h3 className="font-bold text-sm text-zinc-900 dark:text-white uppercase tracking-wider pb-2 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-2">
+                      <Banknote className="h-4 w-4 text-amber-500" /> Configure Pay Structures
+                    </h3>
+                    <div className="space-y-4">
+                      {/* Form */}
+                      <form onSubmit={handleCreatePayStructure} className="space-y-3 pt-1 text-xs">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <label className="text-[9px] uppercase font-bold text-zinc-400">Name</label>
+                            <input
+                              required
+                              type="text"
+                              placeholder="E.g. Daily Wage"
+                              value={newPsName}
+                              onChange={e => setNewPsName(e.target.value)}
+                              className="w-full h-10 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 focus:outline-none focus:border-amber-500 transition-colors font-semibold"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[9px] uppercase font-bold text-zinc-400">Days per Period</label>
+                            <input
+                              required
+                              type="number"
+                              min="0"
+                              max="365"
+                              placeholder="26"
+                              value={newPsDays}
+                              onChange={e => setNewPsDays(e.target.value)}
+                              className="w-full h-10 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-855 rounded-xl px-3 focus:outline-none focus:border-amber-500 transition-colors font-semibold"
+                            />
+                          </div>
+                        </div>
+                        <span className="text-[9px] text-zinc-450 dark:text-zinc-500 block leading-tight">
+                          Set to 0 if Hourly pay. Standard Weekly is 6; Monthly is 26.
+                        </span>
+                        <div className="flex gap-2">
+                          <button
+                            type="submit"
+                            disabled={isSavingPs}
+                            className="flex-1 bg-gradient-to-r from-zinc-900 to-zinc-800 dark:from-zinc-100 dark:to-zinc-200 dark:text-zinc-950 text-white font-bold h-10 rounded-xl cursor-pointer transition-all uppercase tracking-wide flex items-center justify-center gap-1.5 shadow-xs"
+                          >
+                            {isSavingPs && <span className="h-3.5 w-3.5 border-2 border-white dark:border-zinc-900 border-t-transparent rounded-full animate-spin"></span>}
+                            {editingPsId ? "Update Pay Structure" : "Add Pay Structure"}
+                          </button>
+                          {editingPsId && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingPsId(null);
+                                setNewPsName("");
+                                setNewPsDays(26);
+                              }}
+                              className="px-3 border border-zinc-200 dark:border-zinc-800 text-zinc-500 font-bold h-10 rounded-xl cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors uppercase"
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </div>
+                      </form>
+                      {/* List */}
+                      <div className="border border-zinc-100 dark:border-zinc-850 rounded-xl overflow-hidden max-h-48 overflow-y-auto">
+                        <table className="w-full text-left border-collapse font-sans text-xs">
+                          <thead>
+                            <tr className="bg-zinc-50 dark:bg-zinc-955 border-b border-zinc-150 dark:border-zinc-800 text-zinc-405 dark:text-zinc-500 font-bold uppercase tracking-wider text-[9px]">
+                              <th className="px-4 py-3">Structure Name</th>
+                              <th className="px-4 py-3">Days Divisor</th>
+                              <th className="px-4 py-3 text-right">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/80 font-medium text-[11px] sm:text-xs">
+                            {payStructures.map(ps => {
+                              const isCore = ["Monthly", "Weekly", "Hourly"].includes(ps.name);
+                              return (
+                                <tr key={ps.id} className="hover:bg-zinc-50/40 dark:hover:bg-zinc-800/20 transition-colors">
+                                  <td className="px-4 py-2.5 font-bold text-zinc-900 dark:text-zinc-105">
+                                    {ps.name} {isCore && <span className="text-[9px] uppercase bg-zinc-200 dark:bg-zinc-800 text-zinc-500 px-1.5 py-0.5 ml-1 rounded-none">Core</span>}
+                                  </td>
+                                  <td className="px-4 py-2.5 font-mono text-zinc-650 dark:text-zinc-400">
+                                    {ps.daysPerPeriod > 0 ? `${ps.daysPerPeriod} days` : "Hourly"}
+                                  </td>
+                                  <td className="px-4 py-2.5 text-right">
+                                    <div className="inline-flex gap-1.5 justify-end">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingPsId(ps.id);
+                                          setNewPsName(ps.name);
+                                          setNewPsDays(ps.daysPerPeriod);
+                                        }}
+                                        className="p-1.5 text-zinc-650 hover:text-white border border-zinc-200 dark:border-zinc-800 hover:bg-amber-500 hover:border-amber-500 rounded-lg cursor-pointer transition-all"
+                                        title="Edit"
+                                      >
+                                        <Pencil className="h-3.5 w-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeletePayStructure(ps.id, ps.name)}
+                                        className="p-1.5 text-red-500 hover:text-white border border-red-200 dark:border-red-900/40 hover:bg-red-550 rounded-lg cursor-pointer transition-all"
+                                        title="Delete"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 

@@ -2,6 +2,11 @@ import { getSequelize } from "./sequelize";
 import * as initSchemas from "../migrations/00_init_schemas";
 import * as addPasswordToEmployees from "../migrations/01_add_password_to_employees";
 import * as addProfilePhotoToEmployees from "../migrations/02_add_profile_photo_to_employees";
+import * as addPayFieldsToEmployees from "../migrations/03_add_pay_fields_to_employees";
+import * as createPayrollRecords from "../migrations/04_create_payroll_records";
+import * as addShiftTimingsToEmployees from "../migrations/05_add_shift_timings_to_employees";
+import * as createEmploymentTypes from "../migrations/06_create_employment_types";
+import * as createDepartmentsAndPayStructures from "../migrations/07_create_departments_and_pay_structures";
 
 interface Migration {
   name: string;
@@ -24,6 +29,31 @@ const MIGRATIONS: Migration[] = [
     name: "02_add_profile_photo_to_employees.ts",
     up: addProfilePhotoToEmployees.up,
     down: addProfilePhotoToEmployees.down
+  },
+  {
+    name: "03_add_pay_fields_to_employees.ts",
+    up: addPayFieldsToEmployees.up,
+    down: addPayFieldsToEmployees.down
+  },
+  {
+    name: "04_create_payroll_records.ts",
+    up: createPayrollRecords.up,
+    down: createPayrollRecords.down
+  },
+  {
+    name: "05_add_shift_timings_to_employees.ts",
+    up: addShiftTimingsToEmployees.up,
+    down: addShiftTimingsToEmployees.down
+  },
+  {
+    name: "06_create_employment_types.ts",
+    up: createEmploymentTypes.up,
+    down: createEmploymentTypes.down
+  },
+  {
+    name: "07_create_departments_and_pay_structures.ts",
+    up: createDepartmentsAndPayStructures.up,
+    down: createDepartmentsAndPayStructures.down
   }
 ];
 

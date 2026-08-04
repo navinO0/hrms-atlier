@@ -70,6 +70,13 @@ export class Employee extends Model {
   declare designation: string;
   declare password: string;
   declare profilePhoto?: string | null;
+  declare payType?: "Weekly" | "Monthly" | "Hourly";
+  declare payRate?: number;
+  declare lastPaidAt?: string | null;
+  declare checkInTime?: string | null;
+  declare checkOutTime?: string | null;
+  declare employmentType?: "Full-Time" | "Part-Time";
+  declare breakTime?: number;
 }
 
 export class Order extends Model {
@@ -112,6 +119,39 @@ export class TimesheetEntry extends Model {
   declare images?: string[];
 }
 
+export class PayrollRecord extends Model {
+  declare id: string;
+  declare employeeId: string;
+  declare amount: number;
+  declare netHours: number;
+  declare grossHours: number;
+  declare lunchDeductionHours: number;
+  declare payType: string;
+  declare payRate: number;
+  declare periodStart: string;
+  declare periodEnd: string;
+  declare paidAt: string;
+  declare notes?: string | null;
+}
+
+export class EmploymentType extends Model {
+  declare id: string;
+  declare name: string;
+  declare standardHours: number;
+  declare minHoursForBreak: number;
+}
+
+export class Department extends Model {
+  declare id: string;
+  declare name: string;
+}
+
+export class PayStructure extends Model {
+  declare id: string;
+  declare name: string;
+  declare daysPerPeriod: number;
+}
+
 // ─── Model Initializer ────────────────────────────────────────────────────────
 
 let _modelsInitialized = false;
@@ -133,6 +173,13 @@ export function initModels(sequelize: Sequelize): void {
       designation: { type: DataTypes.STRING, allowNull: false },
       password: { type: DataTypes.STRING, allowNull: false, defaultValue: "password" },
       profilePhoto: { type: DataTypes.TEXT, allowNull: true },
+      payType: { type: DataTypes.STRING, allowNull: false, defaultValue: "Monthly" },
+      payRate: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 0 },
+      lastPaidAt: { type: DataTypes.STRING, allowNull: true },
+      checkInTime: { type: DataTypes.STRING, allowNull: true, defaultValue: "09:00" },
+      checkOutTime: { type: DataTypes.STRING, allowNull: true, defaultValue: "18:00" },
+      employmentType: { type: DataTypes.STRING, allowNull: false, defaultValue: "Full-Time" },
+      breakTime: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 60 },
     },
     { sequelize, modelName: "Employee" }
   );
@@ -201,6 +248,51 @@ export function initModels(sequelize: Sequelize): void {
     { sequelize, modelName: "TimesheetEntry" }
   );
 
+  PayrollRecord.init(
+    {
+      id: { type: DataTypes.STRING, primaryKey: true },
+      employeeId: { type: DataTypes.STRING, allowNull: false },
+      amount: { type: DataTypes.FLOAT, allowNull: false },
+      netHours: { type: DataTypes.FLOAT, allowNull: false },
+      grossHours: { type: DataTypes.FLOAT, allowNull: false },
+      lunchDeductionHours: { type: DataTypes.FLOAT, allowNull: false },
+      payType: { type: DataTypes.STRING, allowNull: false },
+      payRate: { type: DataTypes.FLOAT, allowNull: false },
+      periodStart: { type: DataTypes.STRING, allowNull: false },
+      periodEnd: { type: DataTypes.STRING, allowNull: false },
+      paidAt: { type: DataTypes.STRING, allowNull: false },
+      notes: { type: DataTypes.TEXT, allowNull: true },
+    },
+    { sequelize, modelName: "PayrollRecord" }
+  );
+
+  EmploymentType.init(
+    {
+      id: { type: DataTypes.STRING, primaryKey: true },
+      name: { type: DataTypes.STRING, allowNull: false, unique: true },
+      standardHours: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 8.0 },
+      minHoursForBreak: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 5.0 },
+    },
+    { sequelize, modelName: "EmploymentType" }
+  );
+
+  Department.init(
+    {
+      id: { type: DataTypes.STRING, primaryKey: true },
+      name: { type: DataTypes.STRING, allowNull: false, unique: true },
+    },
+    { sequelize, modelName: "Department" }
+  );
+
+  PayStructure.init(
+    {
+      id: { type: DataTypes.STRING, primaryKey: true },
+      name: { type: DataTypes.STRING, allowNull: false, unique: true },
+      daysPerPeriod: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    },
+    { sequelize, modelName: "PayStructure" }
+  );
+
   // ─── Relationships ──────────────────────────────────────────────────────────
   Timesheet.hasMany(TimesheetEntry, { foreignKey: "timesheetId", as: "entries", onDelete: "CASCADE" });
   TimesheetEntry.belongsTo(Timesheet, { foreignKey: "timesheetId", as: "timesheet" });
@@ -211,6 +303,9 @@ export function initModels(sequelize: Sequelize): void {
   TimesheetEntry.belongsTo(Order, { foreignKey: "orderId", as: "order" });
 
   AttendanceLog.belongsTo(Employee, { foreignKey: "employeeId", as: "employee" });
+
+  PayrollRecord.belongsTo(Employee, { foreignKey: "employeeId", as: "employee" });
+  Employee.hasMany(PayrollRecord, { foreignKey: "employeeId", as: "payrollRecords", onDelete: "CASCADE" });
 }
 
 // ─── Helper Utilities ─────────────────────────────────────────────────────────

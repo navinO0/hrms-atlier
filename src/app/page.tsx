@@ -7,7 +7,11 @@ import {
   Assignment, 
   AttendanceLog, 
   Timesheet, 
-  TimesheetEntry 
+  TimesheetEntry,
+  PayrollRecord,
+  EmploymentType,
+  Department,
+  PayStructure
 } from "@/lib/sequelize";
 import { getSession } from "./actions";
 
@@ -20,6 +24,10 @@ export default async function Page() {
   let assignments: any[] = [];
   let attendance: any[] = [];
   let timesheets: any[] = [];
+  let payrollRecords: any[] = [];
+  let employmentTypes: any[] = [];
+  let departments: any[] = [];
+  let payStructures: any[] = [];
   let session: any = null;
 
   try {
@@ -62,6 +70,23 @@ export default async function Page() {
       ],
       order: [["date", "DESC"], ["submittedAt", "DESC"]]
     });
+
+    payrollRecords = await PayrollRecord.findAll({
+      include: [{ model: Employee, as: "employee" }],
+      order: [["paidAt", "DESC"]]
+    });
+
+    employmentTypes = await EmploymentType.findAll({
+      order: [["name", "ASC"]]
+    });
+
+    departments = await Department.findAll({
+      order: [["name", "ASC"]]
+    });
+
+    payStructures = await PayStructure.findAll({
+      order: [["name", "ASC"]]
+    });
   } catch (err: any) {
     console.error("Database connection/init error in Page:", err);
     dbError = err.message || String(err);
@@ -100,12 +125,20 @@ export default async function Page() {
   const plainEmployees = JSON.parse(JSON.stringify(employees));
   const plainAttendance = JSON.parse(JSON.stringify(attendance));
   const plainTimesheets = JSON.parse(JSON.stringify(timesheets));
+  const plainPayrollRecords = JSON.parse(JSON.stringify(payrollRecords));
+  const plainEmploymentTypes = JSON.parse(JSON.stringify(employmentTypes));
+  const plainDepartments = JSON.parse(JSON.stringify(departments));
+  const plainPayStructures = JSON.parse(JSON.stringify(payStructures));
 
   return (
     <HRMSPortal
       initialEmployees={plainEmployees}
       initialAttendance={plainAttendance}
       initialTimesheets={plainTimesheets}
+      initialPayrollRecords={plainPayrollRecords}
+      initialEmploymentTypes={plainEmploymentTypes}
+      initialDepartments={plainDepartments}
+      initialPayStructures={plainPayStructures}
       initialSession={session}
     />
   );

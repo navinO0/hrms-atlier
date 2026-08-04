@@ -2,8 +2,8 @@ import { z } from "zod";
 
 // Date validation regex (YYYY-MM-DD)
 const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-// Time validation regex (H:MM AM/PM or HH:MM AM/PM, case-insensitive)
-const timeRegex = /^(0?[1-9]|1[0-2]):[0-5][0-9]\s*(AM|PM)$/i;
+// Time validation regex (supports 12-hour AM/PM with unicode/standard space or 24-hour time)
+const timeRegex = /^((0?[1-9]|1[0-2]):[0-5][0-9][\s\u202f\u00a0]*(AM|PM)|([01]?[0-9]|2[0-3]):[0-5][0-9])$/i;
 
 export const EmployeeSchema = z.object({
   name: z.string().min(1, "Name is required").max(255, "Name must be under 255 characters").trim(),
@@ -12,6 +12,27 @@ export const EmployeeSchema = z.object({
   designation: z.string().min(1, "Designation is required").max(255, "Designation must be under 255 characters").trim(),
   password: z.string().min(4, "Password must be at least 4 characters").max(100, "Password must be under 100 characters").trim().optional().or(z.literal("")),
   profilePhoto: z.string().optional().nullable(),
+  payType: z.string().optional().default("Monthly"),
+  payRate: z.number().nonnegative("Pay rate must be non-negative").optional().default(0),
+  checkInTime: z.string().optional().nullable().default("09:00"),
+  checkOutTime: z.string().optional().nullable().default("18:00"),
+  employmentType: z.string().optional().default("Full-Time"),
+  breakTime: z.number().nonnegative("Break time must be non-negative").optional().default(60),
+});
+
+export const EmploymentTypeSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100, "Name must be under 100 characters").trim(),
+  standardHours: z.number().positive("Standard hours must be positive"),
+  minHoursForBreak: z.number().nonnegative("Break trigger threshold must be non-negative"),
+});
+
+export const DepartmentSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100, "Name must be under 100 characters").trim(),
+});
+
+export const PayStructureSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100, "Name must be under 100 characters").trim(),
+  daysPerPeriod: z.number().nonnegative("Days per period must be non-negative"),
 });
 
 export const OrderSchema = z.object({
