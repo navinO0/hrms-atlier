@@ -55,16 +55,16 @@ export async function initDb() {
       // 3. Run schema migrations
       await runMigrations();
 
-      // 4. Seed data if empty
+      // 4. Seed data if empty (disabled for production)
       const empCount = await Employee.count();
       if (empCount === 0) {
-        await Employee.bulkCreate(SEED_EMPLOYEES);
-        await Order.bulkCreate(SEED_ORDERS);
-        await Assignment.bulkCreate(SEED_ASSIGNMENTS);
-        await AttendanceLog.bulkCreate(SEED_ATTENDANCE);
-        await Timesheet.bulkCreate(SEED_TIMESHEETS);
-        await TimesheetEntry.bulkCreate(SEED_TIMESHEET_ENTRIES);
-        console.log("Database initialized and populated with seed data successfully!");
+        // await Employee.bulkCreate(SEED_EMPLOYEES);
+        // await Order.bulkCreate(SEED_ORDERS);
+        // await Assignment.bulkCreate(SEED_ASSIGNMENTS);
+        // await AttendanceLog.bulkCreate(SEED_ATTENDANCE);
+        // await Timesheet.bulkCreate(SEED_TIMESHEETS);
+        // await TimesheetEntry.bulkCreate(SEED_TIMESHEET_ENTRIES);
+        console.log("Database initialized successfully!");
       }
     })();
   }
@@ -83,14 +83,15 @@ export async function resetDb() {
   await undoAllMigrations();
   await runMigrations();
 
-  await Employee.bulkCreate(SEED_EMPLOYEES);
-  await Order.bulkCreate(SEED_ORDERS);
-  await Assignment.bulkCreate(SEED_ASSIGNMENTS);
-  await AttendanceLog.bulkCreate(SEED_ATTENDANCE);
-  await Timesheet.bulkCreate(SEED_TIMESHEETS);
-  await TimesheetEntry.bulkCreate(SEED_TIMESHEET_ENTRIES);
+  // Seeding disabled for production reset
+  // await Employee.bulkCreate(SEED_EMPLOYEES);
+  // await Order.bulkCreate(SEED_ORDERS);
+  // await Assignment.bulkCreate(SEED_ASSIGNMENTS);
+  // await AttendanceLog.bulkCreate(SEED_ATTENDANCE);
+  // await Timesheet.bulkCreate(SEED_TIMESHEETS);
+  // await TimesheetEntry.bulkCreate(SEED_TIMESHEET_ENTRIES);
 
-  console.log("Database reset and populated with seed data successfully!");
+  console.log("Database reset successfully!");
 }
 
 async function autoCheckoutForgottenLogs() {

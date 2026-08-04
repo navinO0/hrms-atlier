@@ -22,7 +22,9 @@ import {
   ChevronUp,
   Camera,
   Fingerprint,
-  TrendingUp
+  TrendingUp,
+  X,
+  Trash2
 } from "lucide-react";
 
 // ── Toast System ──────────────────────────────────────────────
@@ -37,9 +39,10 @@ import {
   clockInAction, 
   clockOutAction, 
   saveManualAttendanceAction, 
-  submitTimesheetAction, 
+  submitTimesheetAction,
   updateTimesheetAction,
-  resetDatabaseAction
+  resetDatabaseAction,
+  deleteEmployeeAction
 } from "@/app/actions";
 
 interface Employee {
@@ -48,6 +51,7 @@ interface Employee {
   code: string;
   department: string;
   designation: string;
+  profilePhoto?: string | null;
 }
 
 
@@ -153,6 +157,33 @@ const uploadToCloud = async (base64Data: string): Promise<string> => {
   return data.secure_url;
 };
 
+// ── Avatar Helpers for Premium Operator Visuals ──
+const getInitials = (name: string) => {
+  if (!name) return "OP";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+  }
+  return name.slice(0, 2).toUpperCase();
+};
+
+const getAvatarBg = (name: string) => {
+  if (!name) return "from-zinc-500 to-zinc-650";
+  const colors = [
+    "from-amber-500 to-orange-600 dark:from-amber-600 dark:to-orange-700",
+    "from-emerald-500 to-teal-600 dark:from-emerald-600 dark:to-teal-700",
+    "from-blue-500 to-indigo-600 dark:from-blue-600 dark:to-indigo-700",
+    "from-purple-500 to-pink-600 dark:from-purple-600 dark:to-pink-700",
+    "from-rose-500 to-red-600 dark:from-rose-600 dark:to-red-700",
+    "from-indigo-500 to-violet-600 dark:from-indigo-600 dark:to-violet-700",
+    "from-cyan-500 to-blue-600 dark:from-cyan-600 dark:to-blue-700",
+  ];
+  let sum = 0;
+  for (let i = 0; i < name.length; i++) {
+    sum += name.charCodeAt(i);
+  }
+  return colors[sum % colors.length];
+};
 
 export default function HRMSPortal({
   initialEmployees,
@@ -245,6 +276,7 @@ export default function HRMSPortal({
   const [empFormPassword, setEmpFormPassword] = useState("");
   const [empFormDept, setEmpFormDept] = useState("Stitching Section");
   const [empFormDesg, setEmpFormDesg] = useState("Stitching Operator");
+  const [empFormPhoto, setEmpFormPhoto] = useState("");
 
   // Form State: Timesheet Submission
   const [timesheetDate, setTimesheetDate] = useState<string>("");
@@ -390,11 +422,12 @@ export default function HRMSPortal({
 
     try {
       if (editingEmployeeId) {
-        const res = await editEmployeeAction(editingEmployeeId, empFormName, empFormCode, empFormDept, empFormDesg, empFormPassword);
+        const res = await editEmployeeAction(editingEmployeeId, empFormName, empFormCode, empFormDept, empFormDesg, empFormPassword, empFormPhoto);
         if (res.success) {
           setEmpFormName("");
           setEmpFormCode("");
           setEmpFormPassword("");
+          setEmpFormPhoto("");
           setEditingEmployeeId(null);
           showToast(`Employee "${empFormName}" updated successfully!`, "success");
           window.location.reload();
@@ -402,11 +435,12 @@ export default function HRMSPortal({
           showToast(res.error || "Failed to update employee.", "error");
         }
       } else {
-        const res = await addEmployeeAction(empFormName, empFormCode, empFormDept, empFormDesg, empFormPassword);
+        const res = await addEmployeeAction(empFormName, empFormCode, empFormDept, empFormDesg, empFormPassword, empFormPhoto);
         if (res.success) {
           setEmpFormName("");
           setEmpFormCode("");
           setEmpFormPassword("");
+          setEmpFormPhoto("");
           showToast(`Employee "${empFormName}" registered successfully!`, "success");
           window.location.reload();
         } else {
@@ -418,6 +452,27 @@ export default function HRMSPortal({
       showToast("An unexpected error occurred while saving.", "error");
     } finally {
       setIsSavingEmployee(false);
+    }
+  };
+
+  const handleDeleteEmployee = async (empId: string, name: string) => {
+    if (!window.confirm(`Are you sure you want to delete employee "${name}"? This will delete all of their attendance logs, timesheets, and assignments.`)) {
+      return;
+    }
+    try {
+      const res = await deleteEmployeeAction(empId);
+      if (res.success) {
+        showToast(`Employee "${name}" deleted successfully!`, "success");
+        if (selectedAdminEmp?.id === empId) {
+          setSelectedAdminEmp(null);
+        }
+        window.location.reload();
+      } else {
+        showToast(res.error || "Failed to delete employee.", "error");
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("An unexpected error occurred while deleting.", "error");
     }
   };
 
@@ -715,35 +770,35 @@ export default function HRMSPortal({
   // Login view if not authenticated
   if (!session || !session.isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-zinc-100 via-white to-zinc-50 text-zinc-800 flex flex-col justify-center items-center p-4 relative overflow-hidden font-sans">
-        <Toaster richColors position="top-right" closeButton swipeDirections={["top", "left", "right"]} />
+      <div className="min-h-screen bg-gradient-to-br from-zinc-105 via-white to-zinc-50 dark:from-zinc-950 dark:via-zinc-900 dark:to-zinc-950 text-zinc-850 dark:text-zinc-100 flex flex-col justify-center items-center p-4 relative overflow-hidden font-sans">
+        <Toaster richColors position="top-right" closeButton />
         
-        {/* Decorative Background blur blobs */}
-        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-amber-500/5 rounded-none blur-[120px] pointer-events-none"></div>
-        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-emerald-500/5 rounded-none blur-[120px] pointer-events-none"></div>
+        {/* Modern blur blobs */}
+        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-amber-500/10 rounded-full blur-[130px] pointer-events-none"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-emerald-500/10 rounded-full blur-[130px] pointer-events-none"></div>
 
-        <div className="w-full max-w-md bg-white border border-zinc-200 p-6 sm:p-8 rounded-none shadow-2xl relative z-10 space-y-6 animate-in fade-in zoom-in-95 duration-300">
+        <div className="w-full max-w-md bg-white/85 dark:bg-zinc-900/85 backdrop-blur-md border border-zinc-200/80 dark:border-zinc-800 p-6 sm:p-8 rounded-2xl shadow-xl relative z-10 space-y-6 animate-in fade-in zoom-in-95 duration-300">
           
-          {/* Logo / Title */}
-          <div className="text-center space-y-2">
-            <div className="inline-flex items-center gap-1.5 bg-amber-50 border border-amber-250 px-3 py-1 rounded-none text-[10px] font-black text-amber-700 uppercase tracking-widest shadow-sm">
-              <span className="h-1.5 w-1.5 rounded-none bg-amber-500 animate-pulse"></span>
-              Security verification
+          {/* Title and Badge */}
+          <div className="text-center space-y-3">
+            <div className="inline-flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/25 px-3 py-1 rounded-full text-[10px] font-black text-amber-700 dark:text-amber-400 uppercase tracking-widest shadow-xs">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+              Security Verification
             </div>
-            <h1 className="text-2xl font-black text-zinc-900 tracking-tight mt-1">Staff Portal</h1>
-            <p className="text-xs text-zinc-500">Garment Production Management System</p>
+            <h1 className="text-2.5xl font-black text-zinc-900 dark:text-zinc-50 tracking-tight mt-1">Staff Portal</h1>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">Garment Production Management System</p>
           </div>
 
           {/* Form */}
           <form onSubmit={handleLogin} className="space-y-4">
             {loginError && (
-              <div className="bg-red-50 border border-red-200 text-red-600 p-3 rounded-none text-xs font-semibold text-center animate-in fade-in slide-in-from-top-1 duration-200">
+              <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/40 text-red-650 dark:text-red-400 p-3.5 rounded-xl text-xs font-semibold text-center animate-in fade-in slide-in-from-top-1 duration-200">
                 {loginError}
               </div>
             )}
 
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">
+              <label className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
                 Username or Employee Code
               </label>
               <div className="relative">
@@ -756,13 +811,13 @@ export default function HRMSPortal({
                   placeholder="Enter Username or Employee Code"
                   value={loginUsername}
                   onChange={e => setLoginUsername(e.target.value)}
-                  className="w-full h-11 bg-zinc-50/50 border border-zinc-200 hover:border-zinc-350 focus:border-amber-500/80 rounded-none pl-11 pr-4 focus:outline-none text-sm font-medium text-zinc-900 placeholder-zinc-400 transition-all focus:bg-white focus:shadow-xs"
+                  className="w-full h-11 bg-zinc-50/50 dark:bg-zinc-950/50 border border-zinc-200 dark:border-zinc-800 focus:border-amber-500 dark:focus:border-amber-500 focus:ring-1 focus:ring-amber-500 rounded-xl pl-11 pr-4 focus:outline-none text-xs font-semibold text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 transition-all focus:bg-white dark:focus:bg-zinc-950"
                 />
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">
+              <label className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">
                 Password
               </label>
               <div className="relative">
@@ -775,12 +830,12 @@ export default function HRMSPortal({
                   placeholder="Enter password"
                   value={loginPassword}
                   onChange={e => setLoginPassword(e.target.value)}
-                  className="w-full h-11 bg-zinc-50/50 border border-zinc-200 hover:border-zinc-350 focus:border-amber-500/80 rounded-none pl-11 pr-11 focus:outline-none text-sm font-medium text-zinc-900 placeholder-zinc-400 transition-all focus:bg-white focus:shadow-xs"
+                  className="w-full h-11 bg-zinc-50/50 dark:bg-zinc-950/50 border border-zinc-200 dark:border-zinc-800 focus:border-amber-500 dark:focus:border-amber-500 focus:ring-1 focus:ring-amber-500 rounded-xl pl-11 pr-11 focus:outline-none text-xs font-semibold text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 transition-all focus:bg-white dark:focus:bg-zinc-950"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-650 transition-colors focus:outline-none cursor-pointer"
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-250 transition-colors focus:outline-none cursor-pointer"
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -790,7 +845,7 @@ export default function HRMSPortal({
             <button
               type="submit"
               disabled={isLoggingIn}
-              className="w-full h-11 bg-amber-500 hover:bg-amber-600 disabled:opacity-75 disabled:cursor-not-allowed active:scale-[0.98] text-white font-black rounded-none text-xs uppercase tracking-wider transition-all shadow-md shadow-amber-500/15 cursor-pointer flex items-center justify-center gap-2 mt-4"
+              className="w-full h-11 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 active:scale-[0.98] disabled:opacity-75 disabled:cursor-not-allowed text-white font-bold rounded-xl text-xs uppercase tracking-wider transition-all shadow-md shadow-amber-500/10 cursor-pointer flex items-center justify-center gap-2 mt-4"
             >
               {isLoggingIn ? (
                 <span className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
@@ -801,15 +856,15 @@ export default function HRMSPortal({
             </button>
           </form>
 
-          {/* Quick Persistent Login section */}
+          {/* Saved Session Section */}
           {lastLoginCode && (
-            <div className="p-3 bg-zinc-50 border border-zinc-200 rounded-none space-y-2.5 text-xs text-left animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="p-4 bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-150 dark:border-zinc-850 rounded-xl space-y-3 text-xs text-left animate-in fade-in slide-in-from-bottom-2 duration-300">
               <div className="flex justify-between items-center">
-                <span className="text-[9px] uppercase font-black text-zinc-400 tracking-wider">Saved Session</span>
+                <span className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500 tracking-wider">Saved Session</span>
                 <button
                   type="button"
                   onClick={handleClearLastLogin}
-                  className="text-[9px] uppercase font-black text-red-500 hover:text-red-700 tracking-wider transition-colors cursor-pointer"
+                  className="text-[9px] uppercase font-bold text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-500 tracking-wider transition-colors cursor-pointer"
                 >
                   Clear History
                 </button>
@@ -818,10 +873,10 @@ export default function HRMSPortal({
                 type="button"
                 disabled={isLoggingIn}
                 onClick={handleProceedLastLogin}
-                className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-75 disabled:cursor-not-allowed text-white font-extrabold text-[10px] uppercase tracking-wider transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
+                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-75 disabled:cursor-not-allowed text-white font-extrabold text-[10px] uppercase tracking-wider rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-sm shadow-emerald-600/10"
               >
                 {isLoggingIn ? (
-                  <span className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                  <span className="h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
                 ) : (
                   <UserCheck className="h-3.5 w-3.5" />
                 )}
@@ -830,64 +885,38 @@ export default function HRMSPortal({
             </div>
           )}
 
-          {/* Helper details */}
-          <div className="bg-zinc-50 border border-zinc-200 p-4 rounded-none text-[11px] text-zinc-550 space-y-2.5 leading-relaxed">
-            <span className="font-extrabold uppercase text-amber-600 tracking-wider text-[10px] flex items-center gap-1.5">
-              <ClipboardList className="h-3.5 w-3.5 text-amber-500" />
-              Sign In Credentials Reference
-            </span>
-            <p>Admin Profile: Use username <strong className="text-zinc-800 font-mono font-bold">admin</strong> and password <strong className="text-zinc-800 font-mono font-bold">admin</strong>.</p>
-            <p>Employee Profiles: Enter employee code as username, and password <strong className="text-zinc-800 font-mono font-bold">password</strong>.</p>
-            <div className="pt-1.5 border-t border-zinc-200">
-              <span className="text-[9px] uppercase font-bold text-zinc-400 block mb-1.5">Available Employee Codes:</span>
-              <div className="flex flex-wrap gap-1.5 font-mono text-[9px]">
-                {employees.length > 0 ? (
-                  employees.slice(0, 4).map(emp => (
-                    <span key={emp.id} className="bg-white border border-zinc-200 text-zinc-700 px-2 py-0.5 rounded-none hover:border-amber-500/40 transition-colors">{emp.code} ({emp.name.split(" ")[0]})</span>
-                  ))
-                ) : (
-                  <>
-                    <span className="bg-white border border-zinc-200 text-zinc-700 px-2 py-0.5 rounded-none">EMP-101 (Amit)</span>
-                    <span className="bg-white border border-zinc-200 text-zinc-700 px-2 py-0.5 rounded-none">EMP-102 (Priya)</span>
-                    <span className="bg-white border border-zinc-200 text-zinc-700 px-2 py-0.5 rounded-none">EMP-103 (Sunita)</span>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
+
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-955 text-zinc-800 dark:text-zinc-200">
-      <Toaster richColors position="top-right" closeButton swipeDirections={["top", "left", "right"]} />
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-955 text-zinc-800 dark:text-zinc-200 transition-colors duration-200 font-sans">
+      <Toaster richColors position="top-right" closeButton />
       
-      {/* Sleek Minimalist Header */}
-      <header className="sticky top-0 z-40 w-full border-b border-zinc-150 dark:border-zinc-850 bg-white dark:bg-zinc-900 px-2 py-1.5 flex justify-between items-center gap-1.5">
+      {/* Premium Navigation Header */}
+      <header className="sticky top-0 z-40 w-full border-b border-zinc-200/80 dark:border-zinc-850 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md px-4 sm:px-6 py-3 flex justify-between items-center gap-4">
         
-        <div className="flex items-center gap-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-          <p className="text-[10px] sm:text-xs font-bold tracking-tight text-zinc-900 dark:text-zinc-50">Staff Portal</p>
+        <div className="flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span>
+          <p className="text-xs sm:text-sm font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50">Staff Portal</p>
         </div>
 
         {/* User context & Logout */}
-        <div className="flex items-center gap-1.5">
-          <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800/80 border border-zinc-200/50 dark:border-zinc-700/40 px-1.5 py-0.5 rounded-none">
-            <span className={`h-1 w-1 rounded-full ${session.authRole === "Admin" ? "bg-amber-550 animate-pulse" : "bg-emerald-500"}`}></span>
-            <span className="text-[8px] sm:text-[9px] font-bold text-zinc-650 dark:text-zinc-300">
-              {session.authRole === "Admin" ? "Admin" : `${currentEmployee?.name} (${currentEmployee?.code})`}
+        <div className="flex items-center gap-3">
+          <div className="hidden sm:flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800/80 border border-zinc-200/50 dark:border-zinc-700/40 px-3 py-1.5 rounded-xl shadow-xs">
+            <span className={`h-1.5 w-1.5 rounded-full ${session.authRole === "Admin" ? "bg-amber-500 animate-pulse" : "bg-emerald-500"}`}></span>
+            <span className="text-[10px] sm:text-xs font-bold text-zinc-700 dark:text-zinc-200">
+              {session.authRole === "Admin" ? "Admin Console" : `${currentEmployee?.name} (${currentEmployee?.code})`}
             </span>
           </div>
 
-
-
           <button
             onClick={handleLogout}
-            className="px-1.5 py-0.5 text-[8px] sm:text-[9px] font-bold text-red-500 hover:text-red-650 border border-red-200 dark:border-red-900/40 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-none cursor-pointer transition-all uppercase tracking-wider flex items-center gap-0.5"
+            className="px-3 py-1.5 text-[10px] sm:text-xs font-bold text-red-500 hover:text-white border border-red-200 dark:border-red-900/40 hover:bg-red-550 rounded-xl cursor-pointer transition-all uppercase tracking-wider flex items-center gap-1.5 shadow-xs"
           >
-            <LogOut className="h-2.5 w-2.5" />
+            <LogOut className="h-3 w-3" />
             Logout
           </button>
         </div>
@@ -895,155 +924,147 @@ export default function HRMSPortal({
       </header>
 
       {/* Main Page Layout Container */}
-      <main className="max-w-5xl mx-auto p-2.5 space-y-3">
+      <main className="max-w-5xl mx-auto px-4 py-5 sm:py-7 space-y-6">
         
         {/* ===================================== */}
         {/*           ADMIN CONSOLE PANEL         */}
         {/* ===================================== */}
         {currentRole === "Admin" && (
-          <div className="space-y-3 animate-in fade-in duration-150">
+          <div className="space-y-5 animate-in fade-in duration-200">
             
-            {/* Minimal KPI Stats Row */}
-            <div className="grid grid-cols-2 gap-2 text-left">
-              <div className="bg-white dark:bg-zinc-900 p-2 border border-zinc-200 dark:border-zinc-800 rounded-none-none shadow-sm">
-                <span className="text-[10px] text-zinc-455 dark:text-zinc-500 font-bold uppercase tracking-wider block">Total Roster</span>
-                <span className="text-base font-bold text-zinc-900 dark:text-zinc-550 block mt-0.5">{employees.length} operators</span>
+            {/* Compact Summary Bar */}
+            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2.5 flex items-center justify-between text-[11px] font-bold text-zinc-550 dark:text-zinc-400">
+              <div className="flex items-center gap-1.5">
+                <Users className="h-3.5 w-3.5 text-amber-500" />
+                <span>Total Staff: <span className="text-zinc-900 dark:text-white font-extrabold">{employees.length} Staff</span></span>
               </div>
-              <div className="bg-white dark:bg-zinc-900 p-2 border border-zinc-200 dark:border-zinc-800 rounded-none-none shadow-sm">
-                <span className="text-[10px] text-zinc-455 dark:text-zinc-500 font-bold uppercase tracking-wider block">Today Present</span>
-                <span className="text-base font-bold text-emerald-600 block mt-0.5">
-                  {attendance.filter(a => a.date === getLocalTodayString() && a.status === "Clocked In").length} active
-                </span>
+              <div className="h-3 w-px bg-zinc-200 dark:bg-zinc-800"></div>
+              <div className="flex items-center gap-1.5">
+                <UserCheck className="h-3.5 w-3.5 text-emerald-500 animate-pulse" />
+                <span>Present Today: <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">{attendance.filter(a => a.date === getLocalTodayString() && a.status === "Clocked In").length} Active</span></span>
               </div>
             </div>
 
             {/* Admin Tabs */}
-            <div className="flex border-b border-zinc-200 dark:border-zinc-800 text-[8px] sm:text-[9px] font-bold gap-2 overflow-x-auto no-scrollbar scrollbar-none whitespace-nowrap">
-              <button 
-                onClick={() => setAdminTab("status")} 
-                className={`py-1.5 px-1 border-b-2 font-bold tracking-tight transition-all shrink-0 whitespace-nowrap uppercase cursor-pointer text-[8.5px] sm:text-[9.5px] ${
-                  adminTab === "status" 
-                    ? "border-amber-500 text-zinc-955 dark:text-zinc-50" 
-                    : "border-transparent text-zinc-400"
-                }`}
-              >
-                Attendance logs
-              </button>
-              <button 
-                onClick={() => setAdminTab("logs")} 
-                className={`py-1.5 px-1 border-b-2 font-bold tracking-tight transition-all shrink-0 whitespace-nowrap uppercase cursor-pointer text-[8.5px] sm:text-[9.5px] ${
-                  adminTab === "logs" 
-                    ? "border-amber-500 text-zinc-955 dark:text-zinc-50" 
-                    : "border-transparent text-zinc-400"
-                }`}
-              >
-                Timesheet Ledger
-              </button>
-              <button 
-                onClick={() => setAdminTab("roster")} 
-                className={`py-1.5 px-1 border-b-2 font-bold tracking-tight transition-all shrink-0 whitespace-nowrap uppercase cursor-pointer text-[8.5px] sm:text-[9.5px] ${
-                  adminTab === "roster" 
-                    ? "border-amber-500 text-zinc-955 dark:text-zinc-50" 
-                    : "border-transparent text-zinc-400"
-                }`}
-              >
-                Roster Management
-              </button>
+            <div className="flex border-b border-zinc-200 dark:border-zinc-800 overflow-x-auto no-scrollbar scrollbar-none whitespace-nowrap">
+              {([
+                { id: "status", label: "Attendance", icon: ClipboardList },
+                { id: "logs", label: "Ledger", icon: Clock },
+                { id: "roster", label: "Staff", icon: Users }
+              ] as const).map(tab => {
+                const Icon = tab.icon;
+                const isActive = adminTab === tab.id;
+                return (
+                  <button 
+                    key={tab.id}
+                    onClick={() => setAdminTab(tab.id)} 
+                    className={`py-2.5 px-3.5 border-b-2 font-bold tracking-tight transition-all shrink-0 whitespace-nowrap uppercase cursor-pointer text-[10px] sm:text-xs flex items-center gap-1.5 ${
+                      isActive 
+                        ? "border-amber-500 text-amber-600 dark:text-amber-400 bg-amber-500/5"
+                        : "border-transparent text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-300"
+                    }`}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {tab.label}
+                  </button>
+                );
+              })}
             </div>
-
-
+            
             {/* Admin TAB: Attendance Logs */}
             {adminTab === "status" && (
-              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-none overflow-hidden shadow-sm text-left animate-in fade-in duration-150">
-                <div className="flex justify-between items-center p-2 border-b border-zinc-150 dark:border-zinc-805 bg-zinc-50/50 dark:bg-zinc-955/20">
-                  <span className="font-bold text-[8.5px] sm:text-[10px] text-zinc-500 uppercase tracking-wider">Daily Attendance</span>
-                  <span className="text-[8px] sm:text-[9px] text-amber-500 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded-none animate-pulse">Click row to manage</span>
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-none overflow-hidden shadow-xs text-left animate-in fade-in duration-200">
+                <div className="flex justify-between items-center px-3.5 py-3 border-b border-zinc-150 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-955/20">
+                  <span className="font-bold text-xs text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Daily Attendance</span>
+                  <span className="text-[9px] text-amber-600 dark:text-amber-400 font-bold bg-amber-500/10 px-2 py-0.5 animate-pulse">Click card to manage</span>
                 </div>
-                <div className="overflow-x-auto text-[10px] sm:text-[11px]">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-zinc-50 dark:bg-zinc-955/40 border-b border-zinc-150 dark:border-zinc-800 text-zinc-400 font-bold uppercase tracking-wide text-[8px] sm:text-[9.5px]">
-                        <th className="p-2">Employee</th>
-                        <th className="p-2 hidden sm:table-cell">Department</th>
-                        <th className="p-2">Clock In</th>
-                        <th className="p-2">Clock Out</th>
-                        <th className="p-2 text-center">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800 font-medium">
-                      {employees.map(emp => {
-                        const todayPunches = getEmployeeTodayPunches(emp.id);
-                        const latestLog = getEmployeeLatestPunch(emp.id);
-                        const isCurrentlyClockedIn = latestLog?.status === "Clocked In";
-                        const effectiveMs = getEmployeeEffectiveMsToday(emp.id);
+                <div className="p-3 sm:p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {employees.map(emp => {
+                    const todayPunches = getEmployeeTodayPunches(emp.id);
+                    const latestLog = getEmployeeLatestPunch(emp.id);
+                    const isCurrentlyClockedIn = latestLog?.status === "Clocked In";
 
-                        return (
-                          <tr 
-                            key={emp.id} 
-                            className="hover:bg-zinc-150/40 dark:hover:bg-zinc-800/40 transition-colors"
-                          >
-                            <td className="p-2 cursor-pointer" onClick={() => handleSelectAdminEmp(emp)}>
-                              <p className="font-bold text-zinc-900 dark:text-zinc-100 text-[10px] sm:text-[11px] leading-tight">{emp.name}</p>
-                              <p className="text-[8px] sm:text-[9px] text-zinc-450 font-mono mt-0.5">{emp.code}</p>
-                            </td>
-                            <td className="p-2 text-zinc-550 cursor-pointer hidden sm:table-cell" onClick={() => handleSelectAdminEmp(emp)}>{emp.department}</td>
-                            
-                            {/* Clock In cell (First punch in) */}
-                            <td className="p-2">
-                              {todayPunches.length > 0 ? (
-                                <span className="font-mono text-zinc-600 dark:text-zinc-400 text-[9px] sm:text-[11px]">{todayPunches[0].checkIn}</span>
-                              ) : (
-                                <span className="text-zinc-300 dark:text-zinc-700 text-[9px] sm:text-[11px]">—</span>
-                              )}
-                            </td>
+                    return (
+                      <div 
+                        key={emp.id} 
+                        onClick={() => handleSelectAdminEmp(emp)}
+                        className="border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-3 flex flex-col justify-between hover:border-zinc-350 dark:hover:border-zinc-700 cursor-pointer transition-all space-y-3 rounded-none shadow-xs"
+                      >
+                        {/* Upside: Profile and Name */}
+                        <div className="flex items-center gap-3">
+                          {emp.profilePhoto ? (
+                            <img 
+                              src={emp.profilePhoto} 
+                              alt={emp.name} 
+                              className="h-9 w-9 object-cover border border-zinc-200 dark:border-zinc-800 shrink-0 rounded-none" 
+                            />
+                          ) : (
+                            <div className={`h-9 w-9 bg-gradient-to-br ${getAvatarBg(emp.name)} text-white flex items-center justify-center font-bold text-xs shadow-xs shrink-0 rounded-none`}>
+                              {getInitials(emp.name)}
+                            </div>
+                          )}
+                          <div>
+                            <p className="font-bold text-zinc-900 dark:text-zinc-100 leading-tight text-xs">{emp.name}</p>
+                            <p className="text-[9px] text-zinc-405 dark:text-zinc-500 font-mono mt-0.5">
+                              {emp.code} · {emp.designation}
+                            </p>
+                          </div>
+                        </div>
 
-                            {/* Clock Out / Action cell */}
-                            <td className="p-2 whitespace-nowrap">
-                              {isCurrentlyClockedIn ? (
-                                <p
-                                  onClick={(e) => { e.stopPropagation(); if (!isClocking) handleClockOut(emp.id); }}
-                                  className="cursor-pointer inline-block px-1.5 py-0.5 border border-red-200 dark:border-red-900/50 hover:bg-red-50 dark:hover:bg-red-950/20 text-red-500 hover:text-red-700 font-extrabold uppercase tracking-wider text-[7px] sm:text-[8px] rounded-none transition-colors select-none"
-                                >
-                                  {isClocking ? "…" : "Check Out"}
-                                </p>
-                              ) : (
-                                <p
-                                  onClick={(e) => { e.stopPropagation(); if (!isClocking) handleClockIn(emp.id); }}
-                                  className="cursor-pointer inline-block px-1.5 py-0.5 border border-green-200 dark:border-green-900/50 hover:bg-green-50 dark:hover:bg-green-950/20 text-green-600 hover:text-green-700 font-extrabold uppercase tracking-wider text-[7px] sm:text-[8px] rounded-none transition-colors select-none"
-                                >
-                                  {isClocking ? "…" : "Check In"}
-                                </p>
-                              )}
-                            </td>
-
-                            {/* Status and cumulative time */}
-                            <td className="p-2 text-center cursor-pointer" onClick={() => handleSelectAdminEmp(emp)}>
-                              <div className="flex flex-col items-center gap-0.5">
-                                <span className={`inline-flex items-center rounded-none px-1.5 py-0.5 text-[7px] sm:text-[8px] font-black uppercase tracking-wider border ${
-                                  isCurrentlyClockedIn
-                                    ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-950/10 dark:text-green-400 dark:border-green-900/40"
-                                    : todayPunches.length > 0
-                                    ? "bg-zinc-150 text-zinc-500 border-zinc-200 dark:bg-zinc-800/40 dark:text-zinc-400 dark:border-zinc-700"
-                                    : "bg-red-55 text-red-600 border-red-200 dark:bg-red-950/10 dark:text-red-400 dark:border-red-900/30"
-                                }`}>
-                                  {isCurrentlyClockedIn ? "Active" : todayPunches.length > 0 ? "Offline" : "Absent"}
-                                </span>
-                                {isMounted && effectiveMs > 0 && (
-                                  <span className="text-[7.5px] sm:text-[8.5px] text-zinc-400 font-mono font-bold mt-0.5">
-                                    {fmtMs(effectiveMs)}
-                                  </span>
-                                )}
+                        {/* Downside: Clocking Time, Action Buttons, and Status */}
+                        <div className="pt-2.5 border-t border-dashed border-zinc-155 dark:border-zinc-805 flex items-center justify-between gap-2.5">
+                          {/* Checked In Time */}
+                          <div className="text-[9px] sm:text-[10px] text-zinc-500 dark:text-zinc-400 font-mono leading-tight">
+                            {todayPunches.length > 0 ? (
+                              <div className="space-y-0.5">
+                                <p><span className="font-bold text-zinc-405 uppercase">In:</span> {todayPunches[0].checkIn}</p>
+                                {todayPunches[0].checkOut && <p><span className="font-bold text-zinc-450 uppercase">Out:</span> {todayPunches[0].checkOut}</p>}
                               </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                            ) : (
+                              <p className="text-zinc-305 dark:text-zinc-700 font-semibold italic">No check-in logs</p>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {/* Status Badge */}
+                            <span className={`inline-flex items-center rounded-none px-1.5 py-0.5 text-[8px] sm:text-[9px] font-bold uppercase tracking-wider border ${
+                              isCurrentlyClockedIn
+                                ? "bg-green-500/10 text-green-700 border-green-500/20 dark:text-green-400"
+                                : todayPunches.length > 0
+                                ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-555 border-zinc-200 dark:border-zinc-700 dark:text-zinc-400"
+                                : "bg-red-500/10 text-red-650 border-red-500/20 dark:text-red-400"
+                            }`}>
+                              <span className={`h-1.5 w-1.5 rounded-none mr-1 ${
+                                isCurrentlyClockedIn ? "bg-green-500 animate-pulse" : todayPunches.length > 0 ? "bg-zinc-400" : "bg-red-500"
+                              }`} />
+                              {isCurrentlyClockedIn ? "Active" : todayPunches.length > 0 ? "Offline" : "Absent"}
+                            </span>
+
+                            {/* Action Button */}
+                            {isCurrentlyClockedIn ? (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); if (!isClocking) handleClockOut(emp.id); }}
+                                className="cursor-pointer inline-flex px-1.5 py-0.5 border border-red-200 dark:border-red-900/50 hover:bg-red-550/10 text-red-500 hover:text-red-650 font-bold uppercase tracking-wider text-[8px] rounded-none transition-colors select-none"
+                              >
+                                {isClocking ? "…" : "Check Out"}
+                              </button>
+                            ) : (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); if (!isClocking) handleClockIn(emp.id); }}
+                                className="cursor-pointer inline-flex px-1.5 py-0.5 border border-green-200 dark:border-green-900/50 hover:bg-green-550/10 text-green-600 hover:text-green-700 font-bold uppercase tracking-wider text-[8px] rounded-none transition-colors select-none"
+                              >
+                                {isClocking ? "…" : "Check In"}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
-
+            
             {/* Admin TAB: Timesheet Ledger */}
             {adminTab === "logs" && (() => {
               const filteredTimesheets = timesheets.filter(ts => {
@@ -1053,50 +1074,55 @@ export default function HRMSPortal({
               });
 
               return (
-                <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-none overflow-hidden shadow-sm text-left animate-in fade-in duration-150">
+                <div className="bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-xs text-left animate-in fade-in duration-200">
                   {/* Title & Filters panel */}
-                  <div className="p-3 border-b border-zinc-150 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-955/25 space-y-3">
+                  <div className="p-4 sm:p-5 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-955/20 space-y-4">
                     <div className="flex justify-between items-center">
-                      <span className="font-bold text-[10px] text-zinc-500 uppercase tracking-wider">Timesheets Ledger</span>
-                      <span className="text-[9px] text-zinc-400 font-mono font-bold">
+                      <span className="font-bold text-xs text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Timesheets Ledger</span>
+                      <span className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-650 dark:text-zinc-350 px-2 py-0.5 rounded-lg font-mono font-semibold shadow-xs">
                         Showing {filteredTimesheets.length} of {timesheets.length}
                       </span>
                     </div>
 
                     {/* Filter Inputs Grid */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-                      {/* Operator filter select */}
-                      <div className="space-y-1">
-                        <label className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-550">Filter by Operator</label>
-                        <select
-                          value={filterEmployeeId}
-                          onChange={e => setFilterEmployeeId(e.target.value)}
-                          className="w-full h-8 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-none px-2 focus:outline-none font-bold text-zinc-700 dark:text-zinc-350 cursor-pointer"
-                        >
-                          <option value="">All Operators</option>
-                          {employees.map(emp => (
-                            <option key={emp.id} value={emp.id}>
-                              {emp.name} ({emp.code})
-                            </option>
-                          ))}
-                        </select>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {/* Staff filter select */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 block">Filter by Staff</label>
+                        <div className="relative">
+                          <select
+                            value={filterEmployeeId}
+                            onChange={e => setFilterEmployeeId(e.target.value)}
+                            className="w-full h-10 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 rounded-xl px-3 pr-8 focus:outline-none text-xs font-bold text-zinc-700 dark:text-zinc-300 cursor-pointer appearance-none"
+                          >
+                            <option value="">All Staff</option>
+                            {employees.map(emp => (
+                              <option key={emp.id} value={emp.id}>
+                                {emp.name} ({emp.code})
+                              </option>
+                            ))}
+                          </select>
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none">
+                            <ChevronDown className="h-4 w-4" />
+                          </span>
+                        </div>
                       </div>
 
                       {/* Date filter picker */}
-                      <div className="space-y-1">
-                        <label className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-555">Filter by Date</label>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 block">Filter by Date</label>
                         <div className="relative flex items-center">
                           <input
                             type="date"
                             value={filterDate}
                             onChange={e => setFilterDate(e.target.value)}
-                            className="w-full h-8 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-none px-2 focus:outline-none font-mono font-bold text-zinc-700 dark:text-zinc-350 cursor-pointer"
+                            className="w-full h-10 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 rounded-xl px-3 focus:outline-none font-mono text-xs font-bold text-zinc-700 dark:text-zinc-300 cursor-pointer"
                           />
                           {filterDate && (
                             <button
                               type="button"
                               onClick={() => setFilterDate("")}
-                              className="absolute right-2 text-zinc-400 hover:text-zinc-700 font-bold text-xs cursor-pointer"
+                              className="absolute right-3 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 font-bold text-xs cursor-pointer"
                               title="Clear Date Filter"
                             >
                               ×
@@ -1107,77 +1133,198 @@ export default function HRMSPortal({
                     </div>
                   </div>
 
-                  {filteredTimesheets.length === 0 ? (
-                    <div className="p-6 text-center text-zinc-400 italic text-[11px]">
-                      No timesheets found matching the selected filters.
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-zinc-150 dark:divide-zinc-850 text-xs">
-                      {filteredTimesheets.map(ts => {
-                        const emp = employees.find(e => e.id === ts.employeeId);
-                        const totalHrs = ts.entries.reduce((sum, e) => sum + e.hours, 0);
+                  {(() => {
+                    const getLastThreeDays = () => {
+                      const dates: string[] = [];
+                      for (let i = 0; i < 3; i++) {
+                        const d = new Date();
+                        d.setDate(d.getDate() - i);
+                        const yyyy = d.getFullYear();
+                        const mm = String(d.getMonth() + 1).padStart(2, '0');
+                        const dd = String(d.getDate()).padStart(2, '0');
+                        dates.push(`${yyyy}-${mm}-${dd}`);
+                      }
+                      return dates;
+                    };
 
-                        return (
-                          <div key={ts.id} className="p-2.5 space-y-2 hover:bg-zinc-50/40 dark:hover:bg-zinc-850/10 transition-colors">
-                            
-                            <div className="flex justify-between items-center text-[11px]">
-                              <div>
-                                <span className="font-bold text-zinc-900 dark:text-zinc-55">{emp?.name}</span>
-                                <span className="text-[10px] text-zinc-400 ml-2 font-mono">{ts.date}</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-1.5 py-0.5 rounded-none font-bold text-[10px] border border-zinc-200 dark:border-zinc-700">
-                                  {totalHrs} Hrs
-                                </span>
-                                <span className="text-[9px] text-zinc-400 dark:text-zinc-500 font-mono">
-                                  Sub: {ts.submittedAt}
-                                </span>
-                              </div>
-                            </div>
+                    const lastThreeDays = getLastThreeDays();
+                    const targetDates = filterDate ? [filterDate] : lastThreeDays;
 
-                            <div className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-855 rounded-none p-2.5 space-y-3">
-                              {ts.entries.map((entry, idx) => (
-                                <div key={entry.id || idx} className="space-y-1.5 border-b border-zinc-150/40 dark:border-zinc-800/40 pb-2.5 last:border-0 last:pb-0 text-[11px]">
-                                  <div className="flex justify-between items-start gap-3">
-                                    <span className="text-zinc-600 dark:text-zinc-400 font-medium leading-relaxed break-words">{entry.description}</span>
-                                    <span className="font-mono font-bold text-zinc-700 dark:text-zinc-300 shrink-0">{entry.hours} hr</span>
-                                  </div>
-                                  {(entry.images || []).length > 0 && (
-                                    <div className="flex flex-wrap gap-1.5 pt-0.5">
-                                      {(entry.images || []).map((imgUrl, imgIdx) => (
-                                        <img 
-                                          key={imgIdx}
-                                          src={imgUrl} 
-                                          alt="Work proof" 
-                                          className="h-10 w-10 object-cover rounded-none border border-zinc-200 dark:border-zinc-800 cursor-pointer hover:opacity-80 shrink-0"
-                                          onClick={() => handleOpenPreview(entry.images || [], imgIdx)}
-                                        />
-                                      ))}
-                                    </div>
-                                  )}
+                    const formatDateFriendly = (dateStr: string) => {
+                      const today = getLocalTodayString();
+                      
+                      const yesterdayDate = new Date();
+                      yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+                      const yesterdayStr = yesterdayDate.toISOString().split('T')[0];
+                      
+                      const dbyDate = new Date();
+                      dbyDate.setDate(dbyDate.getDate() - 2);
+                      const dbyStr = dbyDate.toISOString().split('T')[0];
+
+                      if (dateStr === today) return `${dateStr} (Today)`;
+                      if (dateStr === yesterdayStr) return `${dateStr} (Yesterday)`;
+                      if (dateStr === dbyStr) return `${dateStr} (Day Before)`;
+                      
+                      try {
+                        const d = new Date(dateStr);
+                        return d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' });
+                      } catch {
+                        return dateStr;
+                      }
+                    };
+
+                    const allTargetTimesheets = targetDates.flatMap(d => filteredTimesheets.filter(ts => ts.date === d));
+
+                    if (allTargetTimesheets.length === 0) {
+                      return (
+                        <div className="p-10 text-center text-zinc-400 italic text-xs">
+                          No timesheets found matching the selected filters.
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="p-4 sm:p-5 space-y-5">
+                        {targetDates.map(dayStr => {
+                          const dayTimesheets = filteredTimesheets.filter(ts => ts.date === dayStr);
+
+                          if (dayTimesheets.length === 0 && filterDate) {
+                            return null;
+                          }
+
+                          return (
+                            <div key={dayStr} className="space-y-2 text-left">
+                              {/* Date Group Header */}
+                              <div className="flex justify-between items-center bg-zinc-50 dark:bg-zinc-950 p-2.5 border border-zinc-200 dark:border-zinc-800 text-[10px] font-black uppercase tracking-wider text-zinc-400 dark:text-zinc-555 rounded-none">
+                                <span>{formatDateFriendly(dayStr)}</span>
+                                <span className="font-mono text-[9px] bg-zinc-200/50 dark:bg-zinc-800/85 px-2 py-0.5 text-zinc-650 dark:text-zinc-400 rounded-none">
+                                  {dayTimesheets.length} Logs
+                                </span>
+                              </div>
+
+                              {dayTimesheets.length === 0 ? (
+                                <div className="p-4 text-center text-zinc-400 italic text-[11px] border border-dashed border-zinc-200 dark:border-zinc-800 rounded-none">
+                                  No work logs submitted for this date.
                                 </div>
-                              ))}
-                            </div>
+                              ) : (
+                                <div className="space-y-2">
+                                  {dayTimesheets.map(ts => {
+                                    const emp = employees.find(e => e.id === ts.employeeId);
+                                    const totalHrs = ts.entries.reduce((sum, e) => sum + e.hours, 0);
+                                    const isExpanded = !!expandedTimesheets[ts.id];
 
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                                    return (
+                                      <div 
+                                        key={ts.id} 
+                                        className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm hover:border-zinc-350 dark:hover:border-zinc-700 transition-all duration-200 rounded-none"
+                                      >
+                                        {/* Collapsible Header Row */}
+                                        <div 
+                                          onClick={() => setExpandedTimesheets(prev => ({ ...prev, [ts.id]: !prev[ts.id] }))}
+                                          className="p-3 flex items-center justify-between cursor-pointer select-none"
+                                        >
+                                          <div className="flex items-center gap-3">
+                                            {emp?.profilePhoto ? (
+                                              <img 
+                                                src={emp.profilePhoto} 
+                                                alt={emp.name} 
+                                                className="h-8 w-8 object-cover border border-zinc-200 dark:border-zinc-800 shrink-0 rounded-none" 
+                                              />
+                                            ) : (
+                                              <div className={`h-8 w-8 bg-gradient-to-br ${getAvatarBg(emp?.name || "")} text-white flex items-center justify-center font-bold text-[10px] shadow-2xs shrink-0 rounded-none`}>
+                                                {getInitials(emp?.name || "")}
+                                              </div>
+                                            )}
+                                            <div>
+                                              <p className="font-bold text-xs sm:text-sm text-zinc-900 dark:text-zinc-50 leading-tight">
+                                                {emp?.name}
+                                              </p>
+                                              <p className="text-[9px] text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider mt-0.5">
+                                                {emp?.department || "Staff"} · {emp?.code}
+                                              </p>
+                                            </div>
+                                          </div>
+
+                                          <div className="flex items-center gap-3">
+                                            <span className="bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20 text-amber-700 dark:text-amber-400 px-2 py-0.5 font-bold text-xs font-mono rounded-none">
+                                              {totalHrs.toFixed(2)} Hrs
+                                            </span>
+                                            {isExpanded ? (
+                                              <ChevronUp className="h-4 w-4 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors" />
+                                            ) : (
+                                              <ChevronDown className="h-4 w-4 text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-200 transition-colors" />
+                                            )}
+                                          </div>
+                                        </div>
+
+                                        {/* Expanded Body: Work Log details & images */}
+                                        {isExpanded && (
+                                          <div className="p-3 border-t border-zinc-150 dark:border-zinc-800/80 bg-zinc-50/30 dark:bg-zinc-950/20 space-y-2.5 animate-in slide-in-from-top-1 duration-150 rounded-none">
+                                            {ts.entries.map((entry, idx) => (
+                                              <div key={entry.id || idx} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-3 space-y-2 shadow-2xs rounded-none">
+                                                <div className="flex justify-between items-start gap-3">
+                                                  <div className="space-y-1 flex-1">
+                                                    {entry.orderId && (
+                                                      <span className="inline-flex px-1.5 py-0.5 bg-zinc-200/50 dark:bg-zinc-800/80 text-zinc-700 dark:text-zinc-300 font-mono text-[9px] font-bold tracking-wider mr-1.5 rounded-none">
+                                                        {entry.orderId}
+                                                      </span>
+                                                    )}
+                                                    <p className="text-xs text-zinc-750 dark:text-zinc-300 font-medium leading-relaxed">
+                                                      {entry.description}
+                                                    </p>
+                                                  </div>
+                                                  <span className="font-mono font-bold text-xs text-zinc-900 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-950 px-2 py-0.5 border border-zinc-200 dark:border-zinc-800 shrink-0 rounded-none">
+                                                    {entry.hours} hr
+                                                  </span>
+                                                </div>
+
+                                                {/* Proof Images Gallery */}
+                                                {(entry.images || []).length > 0 && (
+                                                  <div className="flex flex-wrap gap-2 pt-1.5 border-t border-zinc-100 dark:border-zinc-800/50 mt-1.5">
+                                                    {(entry.images || []).map((imgUrl, imgIdx) => (
+                                                      <div key={imgIdx} className="relative group shrink-0">
+                                                        <img 
+                                                          src={imgUrl} 
+                                                          alt="Work proof" 
+                                                          className="h-12 w-12 object-cover border border-zinc-200 dark:border-zinc-800 cursor-pointer hover:scale-105 active:scale-95 transition-all shadow-xs rounded-none"
+                                                          onClick={() => handleOpenPreview(entry.images || [], imgIdx)}
+                                                        />
+                                                        <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none rounded-none">
+                                                          <Eye className="h-3.5 w-3.5 text-white" />
+                                                        </div>
+                                                      </div>
+                                                    ))}
+                                                  </div>
+                                                )}
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })()}
 
             {/* Admin TAB: Workforce & Orders Directory */}
             {adminTab === "roster" && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 text-left animate-in fade-in duration-150">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 text-left animate-in fade-in duration-200">
                 
                 {/* Left Forms column: Create Employee */}
                 <div className="lg:col-span-1">
-                  <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-none-none p-2.5 space-y-3 shadow-sm">
-                    <div className="flex justify-between items-center">
-                      <p className="font-bold text-[10px] sm:text-xs text-zinc-900 dark:text-zinc-55 uppercase tracking-wider">
-                        {editingEmployeeId ? "Edit Staff Member" : "Add Staff Member"}
+                  <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-2xl p-4 sm:p-5 space-y-4 shadow-xs">
+                    <div className="flex justify-between items-center pb-2 border-b border-zinc-100 dark:border-zinc-800">
+                      <p className="font-bold text-xs text-zinc-900 dark:text-zinc-50 uppercase tracking-wider">
+                        {editingEmployeeId ? "Edit Staff Profile" : "Register Staff"}
                       </p>
                       {editingEmployeeId && (
                         <button
@@ -1188,23 +1335,35 @@ export default function HRMSPortal({
                             setEmpFormCode("");
                             setEmpFormPassword("");
                           }}
-                          className="text-[9px] font-black text-red-500 hover:text-red-700 uppercase tracking-wider transition-colors cursor-pointer"
+                          className="text-[10px] font-black text-red-500 hover:text-red-750 uppercase tracking-wider transition-colors cursor-pointer"
                         >
                           Cancel
                         </button>
                       )}
                     </div>
-                    <form onSubmit={handleAddEmployeeSubmit} className="space-y-2.5 pt-1 text-xs">
-                      <div className="space-y-1">
-                        <label className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Full Name</label>
-                        <input required placeholder="E.g. Rajesh Kumar" value={empFormName} onChange={e => setEmpFormName(e.target.value)} className="w-full h-8 bg-zinc-50 border border-zinc-200 dark:bg-zinc-955 dark:border-zinc-805 rounded-none px-2.5 focus:outline-none" />
+                    <form onSubmit={handleAddEmployeeSubmit} className="space-y-3.5 pt-1 text-xs">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Full Name</label>
+                        <input 
+                          required 
+                          placeholder="E.g. Rajesh Kumar" 
+                          value={empFormName} 
+                          onChange={e => setEmpFormName(e.target.value)} 
+                          className="w-full h-10 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 focus:outline-none focus:border-amber-500 transition-colors font-semibold" 
+                        />
                       </div>
-                      <div className="space-y-1">
-                        <label className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Employee Code</label>
-                        <input required placeholder="E.g. EMP-105" value={empFormCode} onChange={e => setEmpFormCode(e.target.value)} className="w-full h-8 bg-zinc-50 border border-zinc-200 dark:bg-zinc-955 dark:border-zinc-805 rounded-none px-2.5 focus:outline-none font-mono" />
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Employee Code</label>
+                        <input 
+                          required 
+                          placeholder="E.g. EMP-105" 
+                          value={empFormCode} 
+                          onChange={e => setEmpFormCode(e.target.value)} 
+                          className="w-full h-10 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 focus:outline-none focus:border-amber-500 transition-colors font-mono font-semibold" 
+                        />
                       </div>
-                      <div className="space-y-1">
-                        <label className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Password</label>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Password</label>
                         <div className="relative">
                           <input 
                             type={showFormPassword ? "text" : "password"}
@@ -1212,44 +1371,106 @@ export default function HRMSPortal({
                             placeholder={editingEmployeeId ? "Leave blank to keep current" : "Password"} 
                             value={empFormPassword} 
                             onChange={e => setEmpFormPassword(e.target.value)} 
-                            className="w-full h-8 bg-zinc-50 border border-zinc-200 dark:bg-zinc-955 dark:border-zinc-805 rounded-none px-2.5 pr-8 focus:outline-none" 
+                            className="w-full h-10 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 pr-10 focus:outline-none focus:border-amber-500 transition-colors font-semibold" 
                           />
                           <button
                             type="button"
                             onClick={() => setShowFormPassword(!showFormPassword)}
-                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-650 transition-colors focus:outline-none cursor-pointer"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-650 transition-colors focus:outline-none cursor-pointer"
                           >
-                            {showFormPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                            {showFormPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                           </button>
                         </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="space-y-1">
-                          <label className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Department</label>
-                          <select value={empFormDept} onChange={e => setEmpFormDept(e.target.value)} className="w-full h-8 bg-zinc-50 border border-zinc-200 dark:bg-zinc-955 dark:border-zinc-805 rounded-none px-1 focus:outline-none font-bold text-zinc-705 dark:text-zinc-350 cursor-pointer">
-                            <option value="Stitching Section">Stitching</option>
-                            <option value="Quality Assurance">Quality QA</option>
-                            <option value="Cutting Department">Cutting</option>
-                            <option value="Finishing Section">Finishing</option>
-                            <option value="House Keeping">House Keeping</option>
-                          </select>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Profile Photo</label>
+                        <div className="flex items-center gap-3">
+                          {empFormPhoto ? (
+                            <div className="relative group shrink-0 h-10 w-10 border border-zinc-250 dark:border-zinc-800">
+                              <img src={empFormPhoto} className="h-full w-full object-cover" alt="Profile preview" />
+                              <button 
+                                type="button" 
+                                onClick={() => setEmpFormPhoto("")}
+                                className="absolute -top-1.5 -right-1.5 h-3.5 w-3.5 bg-red-500 text-white text-[8px] flex items-center justify-center cursor-pointer shadow-xs font-bold"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ) : (
+                            <label className="h-10 w-10 border border-dashed border-zinc-350 dark:border-zinc-700 flex flex-col items-center justify-center cursor-pointer hover:border-zinc-500 transition-colors bg-zinc-50 dark:bg-zinc-950">
+                              <Camera className="h-4 w-4 text-zinc-450" />
+                              <input 
+                                type="file" 
+                                accept="image/*" 
+                                className="hidden" 
+                                onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    setIsSavingEmployee(true);
+                                    try {
+                                      const base64 = await compressImage(file);
+                                      const url = await uploadToCloud(base64);
+                                      setEmpFormPhoto(url);
+                                      showToast("Profile photo uploaded successfully!", "success");
+                                    } catch (err) {
+                                      console.error(err);
+                                      showToast("Failed to upload profile photo.", "error");
+                                    } finally {
+                                      setIsSavingEmployee(false);
+                                    }
+                                  }
+                                }}
+                              />
+                            </label>
+                          )}
+                          <span className="text-[10px] text-zinc-400 dark:text-zinc-500 leading-tight">
+                            Optional photo URL (auto-uploaded)
+                          </span>
                         </div>
-                        <div className="space-y-1">
-                          <label className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Designation</label>
-                          <input required placeholder="E.g. Stitcher" value={empFormDesg} onChange={e => setEmpFormDesg(e.target.value)} className="w-full h-8 bg-zinc-50 border border-zinc-200 dark:bg-zinc-955 dark:border-zinc-805 rounded-none px-2 focus:outline-none" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Department</label>
+                          <div className="relative">
+                            <select 
+                              value={empFormDept} 
+                              onChange={e => setEmpFormDept(e.target.value)} 
+                              className="w-full h-10 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 pr-8 focus:outline-none focus:border-amber-500 transition-colors font-bold text-zinc-700 dark:text-zinc-350 cursor-pointer appearance-none"
+                            >
+                              <option value="Stitching Section">Stitching</option>
+                              <option value="Quality Assurance">Quality QA</option>
+                              <option value="Cutting Department">Cutting</option>
+                              <option value="Finishing Section">Finishing</option>
+                              <option value="House Keeping">House Keeping</option>
+                              <option value="Others">Others</option>
+                            </select>
+                            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-450 pointer-events-none">
+                              <ChevronDown className="h-4 w-4" />
+                            </span>
+                          </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Designation</label>
+                          <input 
+                            required 
+                            placeholder="E.g. Stitcher" 
+                            value={empFormDesg} 
+                            onChange={e => setEmpFormDesg(e.target.value)} 
+                            className="w-full h-10 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-805 rounded-xl px-3 focus:outline-none focus:border-amber-500 transition-colors font-semibold" 
+                          />
                         </div>
                       </div>
                       <button
                         type="submit"
                         disabled={isSavingEmployee}
-                        className="w-full bg-zinc-900 hover:bg-zinc-850 disabled:opacity-75 disabled:cursor-not-allowed dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-bold h-8 rounded-none text-xs cursor-pointer transition-colors uppercase tracking-wide flex items-center justify-center gap-1.5"
+                        className="w-full bg-gradient-to-r from-zinc-900 to-zinc-800 hover:from-zinc-950 hover:to-zinc-850 dark:from-zinc-100 dark:to-zinc-200 dark:text-zinc-950 text-white font-bold h-10 rounded-xl text-xs cursor-pointer transition-all uppercase tracking-wide flex items-center justify-center gap-1.5 shadow-xs"
                       >
                         {isSavingEmployee && (
                           <span className="h-3.5 w-3.5 border-2 border-white dark:border-zinc-900 border-t-transparent rounded-full animate-spin"></span>
                         )}
                         {isSavingEmployee 
                           ? (editingEmployeeId ? "Saving..." : "Registering...") 
-                          : (editingEmployeeId ? "Save Changes" : "Register")}
+                          : (editingEmployeeId ? "Save Changes" : "Register Staff")}
                       </button>
                     </form>
                   </div>
@@ -1257,50 +1478,82 @@ export default function HRMSPortal({
 
                 {/* Right lists column: Workforce Directory */}
                 <div className="lg:col-span-2">
-                  <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-none-none overflow-hidden shadow-sm">
-                    <div className="flex justify-between items-center p-2 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-955/20">
-                      <span className="font-bold text-[10px] text-zinc-500 uppercase tracking-wider">Staff List</span>
-                      <span className="text-[9px] text-amber-500 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded-none animate-pulse">Click row to manage</span>
+                  <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-805 rounded-2xl overflow-hidden shadow-xs">
+                    <div className="flex justify-between items-center px-4 py-3.5 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-955/20">
+                      <span className="font-bold text-xs text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Staff List</span>
+                      <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold bg-amber-500/10 px-2 py-0.5 rounded-lg animate-pulse">Click row to manage</span>
                     </div>
-                    <div className="overflow-x-auto text-[11px]">
+                    <div className="overflow-x-auto">
                       <table className="w-full text-left border-collapse">
                         <thead>
-                          <tr className="bg-zinc-50 dark:bg-zinc-955/40 border-b border-zinc-150 dark:border-zinc-800 text-zinc-400 font-bold uppercase tracking-wide">
-                            <th className="p-2.5">Name</th>
-                            <th className="p-2.5">Code</th>
-                            <th className="p-2.5 hidden sm:table-cell">Department</th>
-                            <th className="p-2.5 font-semibold">Designation</th>
-                            <th className="p-2.5 font-semibold text-right">Actions</th>
+                          <tr className="bg-zinc-50/40 dark:bg-zinc-955/20 border-b border-zinc-150 dark:border-zinc-800 text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[9px] sm:text-[10px]">
+                            <th className="px-3 py-2.5 sm:px-4 sm:py-3">Name</th>
+                            <th className="px-3 py-2.5 sm:px-4 sm:py-3 hidden sm:table-cell">Code</th>
+                            <th className="px-3 py-2.5 sm:px-4 sm:py-3 hidden sm:table-cell">Department</th>
+                            <th className="px-3 py-2.5 sm:px-4 sm:py-3 font-semibold">Designation</th>
+                            <th className="px-3 py-2.5 sm:px-4 sm:py-3 font-semibold text-right">Actions</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800 font-medium">
+                        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/80 font-medium text-[11px] sm:text-xs">
                           {employees.map(emp => (
                             <tr 
                               key={emp.id} 
-                              className="hover:bg-zinc-150/40 dark:hover:bg-zinc-800/40 transition-colors"
+                              className="hover:bg-zinc-50/40 dark:hover:bg-zinc-800/20 transition-colors"
                             >
-                              <td className="p-2.5 font-bold text-zinc-900 dark:text-zinc-150 cursor-pointer" onClick={() => handleSelectAdminEmp(emp)} title="Click to manage employee clocking & work logs">{emp.name}</td>
-                              <td className="p-2.5 font-mono text-zinc-550 cursor-pointer" onClick={() => handleSelectAdminEmp(emp)}>{emp.code}</td>
-                              <td className="p-2.5 text-zinc-550 hidden sm:table-cell cursor-pointer" onClick={() => handleSelectAdminEmp(emp)}>{emp.department}</td>
-                              <td className="p-2.5 text-zinc-550 font-semibold cursor-pointer" onClick={() => handleSelectAdminEmp(emp)}>{emp.designation}</td>
-                              <td className="p-2.5 text-right whitespace-nowrap">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setEditingEmployeeId(emp.id);
-                                    setEmpFormName(emp.name);
-                                    setEmpFormCode(emp.code);
-                                    setEmpFormDept(emp.department);
-                                    setEmpFormDesg(emp.designation);
-                                    setEmpFormPassword(""); // Leave empty for password override placeholder
-                                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                                  }}
-                                  className="inline-flex items-center justify-center p-1.5 text-zinc-550 hover:text-zinc-800 dark:hover:text-zinc-200 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-350 bg-white dark:bg-zinc-900 rounded-none cursor-pointer transition-all"
-                                  title="Edit Employee Profile"
-                                >
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </button>
+                              <td className="px-3 py-2.5 sm:px-4 sm:py-3 cursor-pointer font-bold text-zinc-900 dark:text-zinc-100" onClick={() => handleSelectAdminEmp(emp)} title="Click to manage staff member">
+                                <div className="flex items-center gap-2.5">
+                                  {emp.profilePhoto ? (
+                                    <img 
+                                      src={emp.profilePhoto} 
+                                      alt={emp.name} 
+                                      className="h-7 w-7 sm:h-8 sm:w-8 object-cover border border-zinc-200 dark:border-zinc-800 shrink-0" 
+                                    />
+                                  ) : (
+                                    <div className={`h-7 w-7 sm:h-8 sm:w-8 bg-gradient-to-br ${getAvatarBg(emp.name)} text-white flex items-center justify-center font-bold text-[10px] sm:text-xs shadow-xs shrink-0`}>
+                                      {getInitials(emp.name)}
+                                    </div>
+                                  )}
+                                  <div>
+                                    <p className="font-bold text-zinc-900 dark:text-zinc-100 leading-tight">{emp.name}</p>
+                                    <p className="sm:hidden font-mono text-[9px] text-zinc-400 dark:text-zinc-500 mt-0.5 leading-none">{emp.code}</p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5 sm:px-4 sm:py-3 font-mono text-zinc-500 dark:text-zinc-400 cursor-pointer hidden sm:table-cell" onClick={() => handleSelectAdminEmp(emp)}>{emp.code}</td>
+                              <td className="px-3 py-2.5 sm:px-4 sm:py-3 text-zinc-500 dark:text-zinc-400 hidden sm:table-cell cursor-pointer" onClick={() => handleSelectAdminEmp(emp)}>{emp.department}</td>
+                              <td className="px-3 py-2.5 sm:px-4 sm:py-3 text-zinc-650 dark:text-zinc-350 font-semibold cursor-pointer" onClick={() => handleSelectAdminEmp(emp)}>{emp.designation}</td>
+                              <td className="px-3 py-2.5 sm:px-4 sm:py-3 text-right whitespace-nowrap">
+                                <div className="inline-flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setEditingEmployeeId(emp.id);
+                                      setEmpFormName(emp.name);
+                                      setEmpFormCode(emp.code);
+                                      setEmpFormDept(emp.department);
+                                      setEmpFormDesg(emp.designation);
+                                      setEmpFormPassword(""); // Leave empty for password override placeholder
+                                      setEmpFormPhoto(emp.profilePhoto || "");
+                                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                                    }}
+                                    className="inline-flex items-center justify-center p-1.5 sm:p-2 text-zinc-505 hover:text-zinc-800 dark:hover:text-zinc-200 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-350 bg-white dark:bg-zinc-900 rounded-lg cursor-pointer transition-all shadow-xs"
+                                    title="Edit Employee Profile"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteEmployee(emp.id, emp.name);
+                                    }}
+                                    className="inline-flex items-center justify-center p-1.5 sm:p-2 text-red-500 hover:text-white border border-red-200 dark:border-red-900/40 hover:bg-red-500 rounded-lg cursor-pointer transition-all shadow-xs"
+                                    title="Delete Employee"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -1320,34 +1573,43 @@ export default function HRMSPortal({
         {/*          EMPLOYEE PORTAL PANEL        */}
         {/* ===================================== */}
         {currentRole === "Employee" && currentEmployee && (
-          <div className="space-y-0 animate-in fade-in duration-200 text-left max-w-xl mx-auto">
+          <div className="space-y-4 animate-in fade-in duration-200 text-left max-w-xl mx-auto">
 
-            {/* ── Profile Header Strip ─────────────────────── */}
-            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-3 py-2 flex items-center justify-between">
-              <div>
-                <p className="text-[10px] sm:text-xs font-bold text-zinc-900 dark:text-zinc-50 tracking-tight">
-                  {currentEmployee.name}
-                </p>
-                <p className="text-[8px] sm:text-[9px] text-zinc-400 font-bold uppercase tracking-widest mt-0.5">
-                  {currentEmployee.code} · {currentEmployee.designation}
-                </p>
+            {/* ── Profile Header Card ─────────────────────── */}
+            <div className="bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800 p-4 rounded-2xl flex items-center justify-between shadow-xs">
+              <div className="flex items-center gap-3">
+                {currentEmployee.profilePhoto ? (
+                  <img 
+                    src={currentEmployee.profilePhoto} 
+                    alt={currentEmployee.name} 
+                    className="h-10 w-10 object-cover border border-zinc-200 dark:border-zinc-800 shrink-0" 
+                  />
+                ) : (
+                  <div className={`h-10 w-10 bg-gradient-to-br ${getAvatarBg(currentEmployee.name)} text-white flex items-center justify-center font-bold text-sm shadow-xs shrink-0`}>
+                    {getInitials(currentEmployee.name)}
+                  </div>
+                )}
+                <div>
+                  <p className="font-bold text-sm text-zinc-900 dark:text-zinc-50 leading-none">
+                    {currentEmployee.name}
+                  </p>
+                  <p className="text-[10px] text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider mt-1.5 leading-none">
+                    {currentEmployee.code} · {currentEmployee.designation}
+                  </p>
+                </div>
               </div>
-              <div className="flex items-center gap-1">
-                {/* Live status ring */}
-                <span className={`relative flex h-1.5 w-1.5 ${isCurrentlyClocked ? "text-emerald-500" : "text-zinc-400"}`}>
-                  {isCurrentlyClocked && (
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60"></span>
-                  )}
-                  <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${isCurrentlyClocked ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-600"}`}></span>
-                </span>
-                <span className={`text-[8px] sm:text-[9px] font-bold uppercase tracking-widest ${isCurrentlyClocked ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400"}`}>
+              <div className="flex items-center gap-2">
+                <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-wider border ${
+                  isCurrentlyClocked ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-400" : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700"
+                }`}>
+                  <span className={`h-1 w-1 rounded-full mr-1.5 ${isCurrentlyClocked ? "bg-emerald-500 animate-pulse" : "bg-zinc-400"}`}></span>
                   {isCurrentlyClocked ? "On Shift" : latestTodayLog?.status === "Clocked Out" ? "Done" : "Offline"}
                 </span>
               </div>
             </div>
 
             {/* ── Section Tab Bar ──────────────────────────── */}
-            <div className="flex border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 border-x border-zinc-200 dark:border-zinc-800">
+            <div className="flex bg-zinc-100/80 dark:bg-zinc-900 border border-zinc-250/60 dark:border-zinc-800/80 p-1 rounded-xl">
               {([
                 { id: "attendance", label: "Attendance" },
                 { id: "log",        label: "Log Work"   },
@@ -1356,10 +1618,10 @@ export default function HRMSPortal({
                 <button
                   key={tab.id}
                   onClick={() => setEmpSection(tab.id)}
-                  className={`flex-1 py-2 text-[8px] sm:text-[9px] font-bold uppercase tracking-wider border-b-2 transition-all cursor-pointer ${
+                  className={`flex-1 py-2 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
                     empSection === tab.id
-                      ? "border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-50 bg-zinc-50/80 dark:bg-zinc-800/40"
-                      : "border-transparent text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-300"
+                      ? "bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-50 shadow-xs"
+                      : "text-zinc-450 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
                   }`}
                 >
                   {tab.label}
@@ -1371,75 +1633,75 @@ export default function HRMSPortal({
             {/*   SECTION 1: ATTENDANCE                       */}
             {/* ══════════════════════════════════════════════ */}
             {empSection === "attendance" && (
-              <div className="bg-white dark:bg-zinc-900 border-x border-b border-zinc-200 dark:border-zinc-800 animate-in fade-in slide-in-from-top-1 duration-200">
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-xs animate-in fade-in slide-in-from-top-1 duration-200">
 
-                {/* Live Clock */}
-                <div className="px-3 pt-4 pb-3 flex flex-col items-center gap-0.5 border-b border-zinc-100 dark:border-zinc-800">
-                  <span className="text-[8px] sm:text-[10px] font-bold text-zinc-400 uppercase tracking-widest flex items-center gap-1 mb-0.5">
-                    <AlarmClock className="h-2.5 w-2.5" /> Current Time
+                {/* Live Clock Card */}
+                <div className="px-5 py-6 flex flex-col items-center gap-1 border-b border-zinc-100 dark:border-zinc-800/80 bg-zinc-50/30 dark:bg-zinc-950/20">
+                  <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest flex items-center gap-1.5 mb-0.5">
+                    <AlarmClock className="h-3.5 w-3.5 text-amber-500" /> Current Local Time
                   </span>
-                  <span className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-zinc-50 tabular-nums tracking-tight font-mono">
+                  <span className="text-3xl sm:text-4xl font-black text-zinc-900 dark:text-zinc-50 tabular-nums tracking-tight font-mono leading-none">
                     {isMounted ? liveTime : "—"}
                   </span>
-                  <span className="text-[8px] sm:text-[10px] text-zinc-400 font-mono mt-0.5">
+                  <span className="text-[10px] sm:text-xs text-zinc-400 dark:text-zinc-500 font-medium mt-1.5">
                     {isMounted ? new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) : "—"}
                   </span>
                 </div>
 
-                {/* Today's Punch Summary */}
+                {/* Today's Punch Summary Progress */}
                 {todayAttendanceLogs.length > 0 && (
-                  <div className="px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 space-y-2">
+                  <div className="px-5 py-4 border-b border-zinc-100 dark:border-zinc-800/80 space-y-3">
                     {/* Total effective row */}
-                    <div className="flex items-center justify-between pt-1">
-                      <span className="text-[9px] font-black text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
-                        <TrendingUp className="h-2.5 w-2.5" /> Total Effective Today
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
+                        <TrendingUp className="h-3.5 w-3.5 text-emerald-500" /> Total Effective Today
                       </span>
-                      <span className="font-black text-sm font-mono tabular-nums text-zinc-900 dark:text-zinc-50">
+                      <span className="font-bold text-base font-mono tabular-nums text-zinc-900 dark:text-zinc-50">
                         {isMounted ? fmtMs(effectiveMsToday) : "00h 00m 00s"}
                       </span>
                     </div>
 
                     {/* Progress bar */}
-                    <div className="space-y-1">
-                      <div className="h-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                    <div className="space-y-1.5">
+                      <div className="h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
                         <div
-                          className={`h-full rounded-full transition-all duration-1000 ${effectiveMsToday >= 8 * 3600000 ? "bg-gradient-to-r from-green-500 to-green-400" : "bg-gradient-to-r from-amber-400 to-green-400"}`}
+                          className={`h-full rounded-full transition-all duration-1000 ${effectiveMsToday >= 8 * 3600000 ? "bg-gradient-to-r from-emerald-500 to-green-400 shadow-sm" : "bg-gradient-to-r from-amber-400 to-emerald-400 shadow-sm"}`}
                           style={{ width: `${Math.min(100, (effectiveMsToday / (8 * 3600000)) * 100)}%` }}
                         />
                       </div>
-                      <div className="flex justify-between items-center">
-                        <p className="text-[8px] text-zinc-400 font-mono">
+                      <div className="flex justify-between items-center text-[10px]">
+                        <p className="text-zinc-400 dark:text-zinc-500 font-mono">
                           {Math.min(100, Math.floor((effectiveMsToday / (8 * 3600000)) * 100))}% of 8h shift
                         </p>
                         {effectiveMsToday >= 8 * 3600000 && (
-                          <span className="text-[8px] font-black text-green-600 dark:text-green-400 uppercase">✓ Target Met</span>
+                          <span className="font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide">✓ Shift Target Met</span>
                         )}
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* Clock In / Clock Out Button */}
-                <div className="p-3">
+                {/* Clock In / Clock Out Action Button */}
+                <div className="p-4 sm:p-5">
                   {isCurrentlyClocked ? (
                     /* Currently on shift — show Check Out (Red Button) */
                     <button
                       onClick={() => handleClockOut()}
                       disabled={isClocking}
-                      className="w-full py-2.5 bg-red-600 hover:bg-red-700 disabled:bg-red-800 text-white font-bold rounded-none cursor-pointer transition-all uppercase tracking-widest text-[9px] sm:text-xs flex items-center justify-center gap-1 shadow-lg shadow-red-600/10 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full py-3.5 bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white font-bold rounded-xl cursor-pointer transition-all uppercase tracking-widest text-[10px] sm:text-xs flex items-center justify-center gap-2 shadow-md shadow-red-650/10 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Timer className="h-3.5 w-3.5" />
-                      {isClocking ? "Checking Out..." : "Check Out"}
+                      <Timer className="h-4 w-4" />
+                      {isClocking ? "Checking Out..." : "Clock Out / Check Out"}
                     </button>
                   ) : (
                     /* Not on shift — show Check In (Green Button) */
                     <button
                       onClick={() => handleClockIn()}
                       disabled={isClocking}
-                      className="w-full py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-green-800 text-white font-bold rounded-none cursor-pointer transition-all uppercase tracking-widest text-[9px] sm:text-xs flex items-center justify-center gap-1 shadow-lg shadow-green-600/25 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-700 hover:to-green-600 text-white font-bold rounded-xl cursor-pointer transition-all uppercase tracking-widest text-[10px] sm:text-xs flex items-center justify-center gap-2 shadow-md shadow-emerald-650/10 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Fingerprint className="h-3.5 w-3.5" />
-                      {isClocking ? "Checking In..." : "Check In"}
+                      <Fingerprint className="h-4 w-4" />
+                      {isClocking ? "Checking In..." : "Clock In / Check In"}
                     </button>
                   )}
                 </div>
@@ -1461,16 +1723,16 @@ export default function HRMSPortal({
             {empSection === "log" && (
               <div
                 id="timesheet-form-section"
-                className="bg-white dark:bg-zinc-900 border-x border-b border-zinc-200 dark:border-zinc-800 animate-in fade-in slide-in-from-top-1 duration-200"
+                className="bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-xs animate-in fade-in slide-in-from-top-1 duration-200"
               >
                 {/* Form Header */}
-                <div className="px-4 pt-4 pb-3 border-b border-zinc-100 dark:border-zinc-800">
+                <div className="px-4 pt-4 pb-3 border-b border-zinc-100 dark:border-zinc-800/80">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-black text-zinc-900 dark:text-zinc-50 uppercase tracking-wide">
+                      <p className="text-xs font-bold text-zinc-900 dark:text-zinc-50 uppercase tracking-wider">
                         {editingTimesheetId ? "✏️ Edit Work Log" : "📋 Log Today's Work"}
                       </p>
-                      <p className="text-[9px] text-zinc-400 mt-0.5 font-mono">
+                      <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-1 font-mono">
                         {timesheetDate || getLocalTodayString()}
                       </p>
                     </div>
@@ -1478,7 +1740,7 @@ export default function HRMSPortal({
                       <button
                         type="button"
                         onClick={handleCancelEdit}
-                        className="text-[9px] font-bold text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 border border-zinc-200 dark:border-zinc-700 px-2 py-1 uppercase tracking-wider cursor-pointer transition-colors"
+                        className="text-[10px] font-bold text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 border border-zinc-250 dark:border-zinc-850 px-2.5 py-1 rounded-lg uppercase tracking-wider cursor-pointer transition-colors"
                       >
                         Cancel Edit
                       </button>
@@ -1487,24 +1749,24 @@ export default function HRMSPortal({
 
                   {/* Attendance summary inline hint */}
                   {todayAttendanceLogs.length > 0 && (
-                    <div className="mt-2 flex items-center gap-3 text-[9px] font-bold text-zinc-500 bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800 px-2.5 py-1.5">
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-2.5 w-2.5 text-emerald-500" />
-                        First In: <span className="text-zinc-700 dark:text-zinc-300 font-mono ml-0.5">{todayAttendanceLogs[0]?.checkIn || "—"}</span>
+                    <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5 text-[10px] font-bold text-zinc-450 dark:text-zinc-500 bg-zinc-50/50 dark:bg-zinc-950/20 border border-zinc-150 dark:border-zinc-850 px-3 py-2 rounded-xl">
+                      <span className="flex items-center gap-1.5">
+                        <Clock className="h-3.5 w-3.5 text-emerald-500" />
+                        First In: <span className="text-zinc-705 dark:text-zinc-300 font-mono ml-0.5">{todayAttendanceLogs[0]?.checkIn || "—"}</span>
                       </span>
                       <span className="text-zinc-300 dark:text-zinc-700">|</span>
-                      <span className="flex items-center gap-1">
-                        <Timer className="h-2.5 w-2.5 text-red-400" />
-                        Last Out: <span className="text-zinc-700 dark:text-zinc-300 font-mono ml-0.5">{latestTodayLog?.checkOut || (isCurrentlyClocked ? "Active" : "—")}</span>
+                      <span className="flex items-center gap-1.5">
+                        <Timer className="h-3.5 w-3.5 text-red-400" />
+                        Last Out: <span className="text-zinc-705 dark:text-zinc-300 font-mono ml-0.5">{latestTodayLog?.checkOut || (isCurrentlyClocked ? "Active" : "—")}</span>
                       </span>
                       <span className="text-zinc-300 dark:text-zinc-700">|</span>
-                      <span className="text-zinc-700 dark:text-zinc-300 font-mono">
-                        Total Clocked: {isMounted ? fmtMs(effectiveMsToday) : "00h 00m 00s"}
+                      <span className="text-zinc-705 dark:text-zinc-300 font-mono flex items-center gap-1">
+                        Total Clocked: <strong className="font-extrabold">{isMounted ? fmtMs(effectiveMsToday) : "00h 00m 00s"}</strong>
                       </span>
                     </div>
                   )}
                   {todayAttendanceLogs.length === 0 && (
-                    <div className="mt-2 text-[9px] font-bold text-amber-500 bg-amber-50/50 dark:bg-amber-950/10 border border-amber-100 dark:border-amber-900/30 px-2.5 py-1.5">
+                    <div className="mt-2.5 text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-2 rounded-xl">
                       ⚠ You haven't clocked in today yet.
                     </div>
                   )}
@@ -1520,12 +1782,12 @@ export default function HRMSPortal({
 
                         {/* Description */}
                         <div className="space-y-1.5">
-                          <label className="text-[9px] uppercase font-black text-zinc-400 tracking-widest flex items-center gap-1.5">
-                            <FileText className="h-2.5 w-2.5" /> Work Description
+                          <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 tracking-wider flex items-center gap-1.5">
+                            <FileText className="h-3.5 w-3.5" /> Work Description
                           </label>
                           <textarea
                             required
-                            rows={5}
+                            rows={4}
                             placeholder="Describe the work you did today — e.g. 'Completed collar stitching for 12 units of ORD-002 Linen Blazer'"
                             value={row.description}
                             onChange={e => {
@@ -1533,23 +1795,23 @@ export default function HRMSPortal({
                               copy[idx].description = e.target.value;
                               setTimesheetEntries(copy);
                             }}
-                            className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 focus:border-zinc-400 dark:focus:border-zinc-600 rounded-none p-3 text-xs font-medium text-zinc-800 dark:text-zinc-200 resize-y focus:outline-none placeholder-zinc-300 dark:placeholder-zinc-700 transition-colors leading-relaxed"
+                            className="w-full bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 rounded-xl p-3 text-xs font-semibold text-zinc-800 dark:text-zinc-200 resize-y focus:outline-none placeholder-zinc-300 dark:placeholder-zinc-700 transition-colors leading-relaxed"
                           />
                         </div>
 
                         {/* Proof Photos */}
                         <div className="space-y-1.5">
-                          <label className="text-[9px] uppercase font-black text-zinc-400 tracking-widest flex items-center gap-1.5">
-                            <Camera className="h-2.5 w-2.5" /> Proof Photos
-                            <span className="normal-case font-medium text-zinc-300 dark:text-zinc-600 ml-1">(optional)</span>
+                          <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500 tracking-wider flex items-center gap-1.5">
+                            <Camera className="h-3.5 w-3.5" /> Proof Photos
+                            <span className="normal-case font-medium text-zinc-300 dark:text-zinc-650 ml-1">(optional)</span>
                           </label>
                           <div className="flex flex-wrap gap-2 items-center">
                             {(row.images || []).map((imgUrl, imgIdx) => (
-                              <div key={imgIdx} className="relative group">
+                              <div key={imgIdx} className="relative group shrink-0">
                                 <img
                                   src={imgUrl}
                                   alt="Proof"
-                                  className="h-12 w-12 object-cover border border-zinc-200 dark:border-zinc-700 cursor-pointer hover:opacity-80 transition-opacity"
+                                  className="h-14 w-14 object-cover rounded-lg border border-zinc-200 dark:border-zinc-700 cursor-pointer hover:opacity-85 transition-opacity"
                                   onClick={() => handleOpenPreview(row.images || [], imgIdx)}
                                 />
                                 <button
@@ -1559,7 +1821,7 @@ export default function HRMSPortal({
                                     copy[idx].images = (copy[idx].images || []).filter((_, i) => i !== imgIdx);
                                     setTimesheetEntries(copy);
                                   }}
-                                  className="absolute -top-1.5 -right-1.5 h-4 w-4 bg-red-500 text-white rounded-full text-[9px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                                  className="absolute -top-1.5 -right-1.5 h-4 w-4 bg-red-500 text-white rounded-full text-[9px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shadow-xs font-bold"
                                 >
                                   ×
                                 </button>
@@ -1567,7 +1829,7 @@ export default function HRMSPortal({
                             ))}
 
                             {/* Upload trigger */}
-                            <label className={`relative h-12 w-12 border-2 border-dashed border-zinc-300 dark:border-zinc-700 flex flex-col items-center justify-center cursor-pointer hover:border-zinc-500 dark:hover:border-zinc-500 transition-colors ${isUploading ? "opacity-50 cursor-not-allowed" : ""}`}>
+                            <label className={`relative h-14 w-14 border-2 border-dashed border-zinc-305 dark:border-zinc-700 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-zinc-500 dark:hover:border-zinc-500 transition-colors ${isUploading ? "opacity-50 cursor-not-allowed" : ""}`}>
                               <input
                                 type="file"
                                 accept="image/*"
@@ -1595,11 +1857,11 @@ export default function HRMSPortal({
                                 className="sr-only"
                               />
                               {isUploading ? (
-                                <span className="text-[8px] text-zinc-400 font-bold text-center leading-tight">Wait...</span>
+                                <span className="text-[9px] text-zinc-400 dark:text-zinc-550 font-bold text-center leading-tight">Wait...</span>
                               ) : (
                                 <>
-                                  <Camera className="h-3.5 w-3.5 text-zinc-400" />
-                                  <span className="text-[7px] text-zinc-400 font-bold mt-0.5">Add</span>
+                                  <Camera className="h-4 w-4 text-zinc-400" />
+                                  <span className="text-[8px] text-zinc-400 dark:text-zinc-500 font-bold mt-0.5">Add</span>
                                 </>
                               )}
                             </label>
@@ -1610,17 +1872,17 @@ export default function HRMSPortal({
                   </div>
 
                   {/* Submit / Update Button */}
-                  <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                  <div className="pt-3.5 border-t border-zinc-150 dark:border-zinc-800/85">
                     {submitSuccessMsg && (
-                      <div className="mb-3 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 p-2.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-2">
-                        <CheckCircle className="h-3.5 w-3.5 shrink-0" />
+                      <div className="mb-3 bg-emerald-50 dark:bg-emerald-955/20 border border-emerald-250 dark:border-emerald-900/40 p-2.5 rounded-xl text-[10px] font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-2">
+                        <CheckCircle className="h-4 w-4 shrink-0 text-emerald-500" />
                         {submitSuccessMsg}
                       </div>
                     )}
                     <button
                       type="submit"
                       disabled={isUploading}
-                      className="w-full py-3.5 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-black rounded-none cursor-pointer transition-all uppercase tracking-widest text-xs shadow-lg shadow-zinc-900/10 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      className="w-full py-3.5 bg-gradient-to-r from-zinc-900 to-zinc-800 dark:from-zinc-100 dark:to-zinc-200 dark:text-zinc-950 text-white font-black rounded-xl cursor-pointer transition-all uppercase tracking-widest text-xs shadow-md active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
                       <FileText className="h-4 w-4" />
                       {editingTimesheetId ? "Update Work Log" : "Submit Work Log"}
@@ -1630,30 +1892,30 @@ export default function HRMSPortal({
               </div>
             )}
 
-            {/* ══════════════════════════════════════════════ */}
-            {/*   SECTION 3: HISTORY                          */}
-            {/* ══════════════════════════════════════════════ */}
+            {/* ── SECTION 3: HISTORY ────────────────────────── */}
             {empSection === "history" && (
-              <div className="bg-white dark:bg-zinc-900 border-x border-b border-zinc-200 dark:border-zinc-800 animate-in fade-in slide-in-from-top-1 duration-200">
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-xs animate-in fade-in slide-in-from-top-1 duration-200">
 
-                <div className="px-4 pt-4 pb-3 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+                <div className="px-4 py-4 border-b border-zinc-100 dark:border-zinc-800/80 flex items-center justify-between">
                   <div>
-                    <p className="text-xs font-black text-zinc-900 dark:text-zinc-50 uppercase tracking-wide">My Work History</p>
-                    <p className="text-[9px] text-zinc-400 mt-0.5">{employeeTimesheets.length} log{employeeTimesheets.length !== 1 ? "s" : ""} recorded</p>
+                    <p className="text-xs font-bold text-zinc-900 dark:text-zinc-50 uppercase tracking-wider">My Work History</p>
+                    <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-1 font-mono">{employeeTimesheets.length} log{employeeTimesheets.length !== 1 ? "s" : ""} recorded</p>
                   </div>
                   {/* Summary stats */}
-                  <div className="text-right">
-                    <p className="text-lg font-black text-zinc-900 dark:text-zinc-50 tabular-nums">
-                      {employeeTimesheets.reduce((s, ts) => s + ts.entries.reduce((es, e) => es + e.hours, 0), 0).toFixed(1)}
-                    </p>
-                    <p className="text-[8px] text-zinc-400 uppercase font-bold tracking-wider">total hrs</p>
+                  <div className="text-right flex items-center gap-2 bg-zinc-50 dark:bg-zinc-950 px-3 py-1.5 rounded-xl border border-zinc-150 dark:border-zinc-850 shadow-xs">
+                    <div>
+                      <p className="text-lg font-black text-zinc-900 dark:text-zinc-50 font-mono tabular-nums leading-none">
+                        {employeeTimesheets.reduce((s, ts) => s + ts.entries.reduce((es, e) => es + e.hours, 0), 0).toFixed(1)}
+                      </p>
+                      <p className="text-[8px] text-zinc-400 dark:text-zinc-500 uppercase font-bold tracking-wider mt-1 text-center">Total Hrs</p>
+                    </div>
                   </div>
                 </div>
 
                 {employeeTimesheets.length === 0 ? (
-                  <div className="px-4 py-10 text-center">
-                    <History className="h-8 w-8 text-zinc-200 dark:text-zinc-700 mx-auto mb-2" />
-                    <p className="text-xs text-zinc-400 font-medium">No work logs yet.</p>
+                  <div className="px-4 py-12 text-center">
+                    <History className="h-8 w-8 text-zinc-200 dark:text-zinc-700 mx-auto mb-3" />
+                    <p className="text-xs text-zinc-450 dark:text-zinc-500 font-bold">No work logs yet.</p>
                     <button
                       onClick={() => setEmpSection("log")}
                       className="mt-3 text-[10px] font-bold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 underline cursor-pointer transition-colors"
@@ -1662,7 +1924,7 @@ export default function HRMSPortal({
                     </button>
                   </div>
                 ) : (
-                  <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                  <div className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
                     {employeeTimesheets.map(ts => {
                       const totalHours = ts.entries.reduce((sum, e) => sum + e.hours, 0);
                       const isExpanded = !!expandedTimesheets[ts.id];
@@ -1674,54 +1936,57 @@ export default function HRMSPortal({
                           <button
                             type="button"
                             onClick={() => setExpandedTimesheets(prev => ({ ...prev, [ts.id]: !prev[ts.id] }))}
-                            className="w-full flex items-center justify-between px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors cursor-pointer text-left"
+                            className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-zinc-50/55 dark:hover:bg-zinc-800/25 transition-colors cursor-pointer text-left focus:outline-none"
                           >
-                            <div className="flex items-center gap-2.5">
-                              <div className={`h-1.5 w-1.5 rounded-full shrink-0 ${isToday ? "bg-amber-500 animate-pulse" : "bg-zinc-300 dark:bg-zinc-600"}`} />
+                            <div className="flex items-center gap-3">
+                              <div className={`h-2 w-2 rounded-full shrink-0 ${isToday ? "bg-amber-500 animate-pulse" : "bg-zinc-300 dark:bg-zinc-700"}`} />
                               <div>
-                                <div className="flex items-center gap-1.5">
-                                  <p className="text-xs font-black text-zinc-900 dark:text-zinc-100 font-mono">{ts.date}</p>
+                                <div className="flex items-center gap-2">
+                                  <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100 font-mono leading-none">{ts.date}</p>
                                   {isToday ? (
-                                    <span className="text-[8px] bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 font-black uppercase tracking-wider">Today</span>
+                                    <span className="text-[8px] bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/25 px-1.5 py-0.5 rounded font-black uppercase tracking-wider leading-none">Today</span>
                                   ) : (
-                                    <span className="text-[8px] bg-zinc-100 dark:bg-zinc-800 text-zinc-400 px-1.5 py-0.5 font-black uppercase tracking-wider">
-                                      <Lock className="h-2 w-2 inline mr-0.5" />Locked
+                                    <span className="text-[8px] bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 border border-zinc-200 dark:border-zinc-700/80 px-1.5 py-0.5 rounded font-black uppercase tracking-wider leading-none flex items-center gap-0.5">
+                                      <Lock className="h-2 w-2" />Locked
                                     </span>
                                   )}
                                 </div>
-                                <p className="text-[9px] text-zinc-400 font-mono mt-0.5">
-                                  {ts.entries.length} entr{ts.entries.length !== 1 ? "ies" : "y"} · Submitted {ts.submittedAt}
+                                <p className="text-[10px] text-zinc-400 dark:text-zinc-550 font-mono mt-1 leading-none">
+                                  {ts.entries.length} log entr{ts.entries.length !== 1 ? "ies" : "y"} · Sub {ts.submittedAt}
                                 </p>
                               </div>
                             </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <span className="text-sm font-black text-zinc-900 dark:text-zinc-100 font-mono tabular-nums">
+                            <div className="flex items-center gap-3 shrink-0">
+                              <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100 font-mono bg-zinc-50 dark:bg-zinc-950 px-2 py-0.5 border border-zinc-150 dark:border-zinc-850 rounded-lg">
                                 {totalHours.toFixed(1)}<span className="text-[9px] text-zinc-400 font-bold ml-0.5">h</span>
                               </span>
                               {isExpanded
-                                ? <ChevronUp className="h-3.5 w-3.5 text-zinc-400" />
-                                : <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />
+                                ? <ChevronUp className="h-4 w-4 text-zinc-400" />
+                                : <ChevronDown className="h-4 w-4 text-zinc-400" />
                               }
                             </div>
                           </button>
 
                           {/* Expanded entries */}
                           {isExpanded && (
-                            <div className="bg-zinc-50 dark:bg-zinc-950 border-t border-zinc-100 dark:border-zinc-800 px-4 py-3 space-y-4 animate-in slide-in-from-top-1 duration-150">
+                            <div className="bg-zinc-50/50 dark:bg-zinc-950/20 border-t border-zinc-100 dark:border-zinc-800/80 px-4 py-4 space-y-4 animate-in slide-in-from-top-1 duration-150">
                               
                               {/* Work Details Section */}
-                              <div className="space-y-2">
-                                <p className="text-[8px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest border-b border-zinc-150 dark:border-zinc-850 pb-1">
+                              <div className="space-y-3">
+                                <p className="text-[9px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider border-b border-zinc-150 dark:border-zinc-850 pb-1.5">
                                   Work Details
                                 </p>
                                 {ts.entries.map((entry, idx) => (
-                                  <div key={entry.id || idx} className="flex justify-between items-start gap-3 text-xs py-0.5">
-                                    <p className="flex-1 text-zinc-650 dark:text-zinc-400 font-medium leading-relaxed text-[11px] break-words">
-                                      {idx + 1}. {entry.description}
-                                    </p>
-                                    <span className="font-black font-mono text-zinc-805 dark:text-zinc-200 shrink-0 text-[11px]">
-                                      {entry.hours}h
-                                    </span>
+                                  <div key={entry.id || idx} className="relative pl-4 border-l-2 border-zinc-100 dark:border-zinc-800/80 py-1 space-y-1">
+                                    <span className="absolute -left-[5px] top-2 h-2 w-2 rounded-full bg-zinc-300 dark:bg-zinc-700" />
+                                    <div className="flex justify-between items-start gap-4 text-xs">
+                                      <p className="flex-1 text-zinc-650 dark:text-zinc-400 font-medium leading-relaxed">
+                                        {entry.description}
+                                      </p>
+                                      <span className="font-mono font-bold text-zinc-800 dark:text-zinc-200 shrink-0 bg-zinc-50 dark:bg-zinc-950 border border-zinc-150 dark:border-zinc-850 px-2 py-0.5 rounded text-[10px]">
+                                        {entry.hours}h
+                                      </span>
+                                    </div>
                                   </div>
                                 ))}
                               </div>
@@ -1731,19 +1996,23 @@ export default function HRMSPortal({
                                 const allImages = ts.entries.flatMap(entry => entry.images || []);
                                 if (allImages.length === 0) return null;
                                 return (
-                                  <div className="space-y-2">
-                                    <p className="text-[8px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest border-b border-zinc-150 dark:border-zinc-855 pb-1">
+                                  <div className="space-y-3">
+                                    <p className="text-[9px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider border-b border-zinc-150 dark:border-zinc-850 pb-1.5">
                                       Proof Images
                                     </p>
-                                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                    <div className="flex flex-wrap gap-2 pt-0.5">
                                       {allImages.map((url, i) => (
-                                        <img
-                                          key={i}
-                                          src={url}
-                                          alt="Proof"
-                                          className="h-14 w-14 object-cover border border-zinc-200 dark:border-zinc-700 cursor-pointer hover:opacity-80"
-                                          onClick={() => handleOpenPreview(allImages, i)}
-                                        />
+                                        <div key={i} className="relative group shrink-0">
+                                          <img
+                                            src={url}
+                                            alt="Proof"
+                                            className="h-14 w-14 object-cover rounded-lg border border-zinc-200 dark:border-zinc-800 cursor-pointer hover:scale-105 transition-all shadow-xs"
+                                            onClick={() => handleOpenPreview(allImages, i)}
+                                          />
+                                          <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none rounded-lg">
+                                            <Eye className="h-4 w-4 text-white" />
+                                          </div>
+                                        </div>
                                       ))}
                                     </div>
                                   </div>
@@ -1752,16 +2021,16 @@ export default function HRMSPortal({
 
                               {/* Edit button — only today's logs */}
                               {isToday && (
-                                <div className="pt-2 border-t border-dashed border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
-                                  <span className="text-[9px] text-zinc-400">Total: <strong className="text-zinc-700 dark:text-zinc-300 font-mono">{totalHours}h</strong></span>
+                                <div className="pt-3 border-t border-dashed border-zinc-200 dark:border-zinc-800/80 flex justify-between items-center">
+                                  <span className="text-[10px] text-zinc-400 dark:text-zinc-500">Total: <strong className="text-zinc-700 dark:text-zinc-300 font-mono">{totalHours}h</strong></span>
                                   <button
                                     onClick={() => {
                                       handleStartEditTimesheet(ts);
                                       setEmpSection("log");
                                     }}
-                                    className="flex items-center gap-1 px-2.5 py-1.5 text-[9px] font-black bg-amber-500 hover:bg-amber-600 text-white uppercase tracking-wider cursor-pointer transition-colors"
+                                    className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold bg-amber-500 hover:bg-amber-600 active:scale-[0.99] text-white uppercase tracking-wider rounded-lg cursor-pointer transition-all shadow-sm shadow-amber-500/10"
                                   >
-                                    <Pencil className="h-2.5 w-2.5" /> Edit Log
+                                    <Pencil className="h-3 w-3" /> Edit Work Log
                                   </button>
                                 </div>
                               )}
@@ -1779,30 +2048,31 @@ export default function HRMSPortal({
         )}
 
       </main>
+
       {/* Image Preview Modal */}
       {activePreviewImages.length > 0 && (
         <div 
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-2.5 animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200"
           onClick={() => setActivePreviewImages([])}
         >
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2.5 rounded-none-none max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col relative" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center pb-2 border-b border-zinc-150 dark:border-zinc-850">
-              <span className="font-bold text-[10px] text-zinc-400 uppercase tracking-wide">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800 p-3.5 rounded-2xl max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col relative shadow-xl animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center pb-2.5 border-b border-zinc-150 dark:border-zinc-850">
+              <span className="font-bold text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
                 Work Proof Image ({activePreviewIndex + 1} of {activePreviewImages.length})
               </span>
               <button 
                 onClick={() => setActivePreviewImages([])}
-                className="text-xs font-bold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-250 cursor-pointer"
+                className="text-xs font-bold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 cursor-pointer flex items-center gap-1 focus:outline-none"
               >
-                Close
+                <X className="h-4 w-4" /> Close
               </button>
             </div>
-            <div className="relative flex-1 overflow-y-auto pt-2 flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 rounded-none min-h-[300px]">
+            <div className="relative flex-1 overflow-hidden mt-3 flex items-center justify-center bg-zinc-50 dark:bg-zinc-955 rounded-xl min-h-[300px] border border-zinc-100 dark:border-zinc-800">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img 
                 src={activePreviewImages[activePreviewIndex]} 
                 alt="Attachment Proof Preview" 
-                className="max-h-[60vh] object-contain rounded-none select-none" 
+                className="max-h-[60vh] object-contain rounded-lg select-none" 
               />
 
               {/* Navigation arrows */}
@@ -1814,7 +2084,7 @@ export default function HRMSPortal({
                       e.stopPropagation();
                       setActivePreviewIndex(prev => (prev === 0 ? activePreviewImages.length - 1 : prev - 1));
                     }}
-                    className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center text-lg font-black transition-colors cursor-pointer select-none"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/60 hover:bg-black/85 text-white flex items-center justify-center text-lg font-black transition-all cursor-pointer select-none backdrop-blur-xs shadow-xs focus:outline-none"
                     title="Previous Image"
                   >
                     ‹
@@ -1825,7 +2095,7 @@ export default function HRMSPortal({
                       e.stopPropagation();
                       setActivePreviewIndex(prev => (prev === activePreviewImages.length - 1 ? 0 : prev + 1));
                     }}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center text-lg font-black transition-colors cursor-pointer select-none"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/60 hover:bg-black/85 text-white flex items-center justify-center text-lg font-black transition-all cursor-pointer select-none backdrop-blur-xs shadow-xs focus:outline-none"
                     title="Next Image"
                   >
                     ›
@@ -1840,38 +2110,38 @@ export default function HRMSPortal({
       {/* Employee Admin Management Modal */}
       {selectedAdminEmp && (
         <div 
-          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-2.5 animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200"
           onClick={() => setSelectedAdminEmp(null)}
         >
           <div 
-            className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-none w-full max-w-md max-h-[90vh] overflow-y-auto flex flex-col relative text-left" 
+            className="bg-white dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800 p-5 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto flex flex-col relative text-left shadow-xl animate-in zoom-in-95 duration-200 space-y-4" 
             onClick={e => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex justify-between items-center pb-2 border-b border-zinc-150 dark:border-zinc-850">
+            <div className="flex justify-between items-center pb-3 border-b border-zinc-150 dark:border-zinc-850">
               <div>
-                <span className="font-bold text-xs text-zinc-900 dark:text-zinc-50 uppercase tracking-wide block">
-                  Manage Operator
+                <span className="font-bold text-xs text-zinc-900 dark:text-zinc-50 uppercase tracking-wider block">
+                  Manage Staff
                 </span>
-                <span className="text-[10px] text-zinc-400 font-mono">
+                <span className="text-[10px] text-zinc-405 dark:text-zinc-500 font-mono font-semibold mt-0.5 block">
                   {selectedAdminEmp.name} ({selectedAdminEmp.code})
                 </span>
               </div>
               <button 
                 onClick={() => setSelectedAdminEmp(null)}
-                className="text-xs font-bold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-250 cursor-pointer"
+                className="text-xs font-bold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 cursor-pointer flex items-center gap-1 focus:outline-none"
               >
-                Close
+                <X className="h-4 w-4" /> Close
               </button>
             </div>
 
-            <div className="space-y-4 pt-3 text-xs">
+            <div className="space-y-4 pt-1 text-xs">
               {/* Profile Details Card */}
-              <div className="p-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-850 space-y-1">
-                <p className="text-zinc-500 font-bold uppercase text-[9px] tracking-wider">Operator Profile</p>
-                <p className="font-bold text-zinc-900 dark:text-zinc-100">{selectedAdminEmp.name}</p>
-                <p className="text-[10px] text-zinc-400 font-medium">Department: <strong className="text-zinc-700 dark:text-zinc-300">{selectedAdminEmp.department}</strong></p>
-                <p className="text-[10px] text-zinc-400 font-medium">Designation: <strong className="text-zinc-700 dark:text-zinc-300">{selectedAdminEmp.designation}</strong></p>
+              <div className="p-3 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200/60 dark:border-zinc-850 rounded-xl space-y-1.5 shadow-2xs">
+                <p className="text-zinc-450 dark:text-zinc-500 font-bold uppercase text-[9px] tracking-wider leading-none">Staff Profile</p>
+                <p className="font-bold text-sm text-zinc-900 dark:text-zinc-105 leading-none">{selectedAdminEmp.name}</p>
+                <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium">Department: <strong className="text-zinc-700 dark:text-zinc-350">{selectedAdminEmp.department}</strong></p>
+                <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium">Designation: <strong className="text-zinc-700 dark:text-zinc-350">{selectedAdminEmp.designation}</strong></p>
               </div>
 
               {/* Attendance management */}
@@ -1882,32 +2152,32 @@ export default function HRMSPortal({
                 const totalMs = getEmployeeEffectiveMsToday(selectedAdminEmp.id);
 
                 return (
-                  <div className="p-2.5 border border-zinc-200 dark:border-zinc-800 space-y-3">
-                    <p className="text-zinc-500 font-bold uppercase text-[9px] tracking-wider flex items-center gap-1">
-                      <Fingerprint className="h-3 w-3" /> Today's Attendance Status
+                  <div className="p-3 border border-zinc-200/60 dark:border-zinc-800 rounded-xl space-y-3.5">
+                    <p className="text-zinc-450 dark:text-zinc-500 font-bold uppercase text-[9px] tracking-wider flex items-center gap-1.5 leading-none">
+                      <Fingerprint className="h-3.5 w-3.5 text-amber-500" /> Today's Attendance Status
                     </p>
                     
-                    <div className="bg-zinc-50 dark:bg-zinc-950 p-2 border border-zinc-150 dark:border-zinc-850 space-y-2">
+                    <div className="bg-zinc-50 dark:bg-zinc-950 p-3 border border-zinc-150 dark:border-zinc-850 rounded-lg space-y-2.5">
                       <div className="flex justify-between items-center">
                         <div>
-                          <p className="text-[8px] text-zinc-400 uppercase tracking-widest font-mono">Current Status</p>
-                          <p className={`font-black text-[11px] uppercase ${isCurrentlyClockedIn ? "text-green-600 animate-pulse" : "text-zinc-500"}`}>
+                          <p className="text-[9px] text-zinc-400 dark:text-zinc-500 uppercase tracking-widest font-mono leading-none">Current Status</p>
+                          <p className={`font-bold text-[11px] uppercase mt-1 leading-none ${isCurrentlyClockedIn ? "text-green-600 dark:text-green-400 animate-pulse" : "text-zinc-500"}`}>
                             {isCurrentlyClockedIn ? "Clocked In" : todayPunches.length > 0 ? "Clocked Out" : "Absent"}
                           </p>
                         </div>
                         <div className="text-right">
-                          <p className="text-[8px] text-zinc-400 uppercase tracking-widest font-mono">Effective Today</p>
-                          <p className="font-black text-xs font-mono tabular-nums text-zinc-800 dark:text-zinc-200">
+                          <p className="text-[9px] text-zinc-400 dark:text-zinc-500 uppercase tracking-widest font-mono leading-none">Effective Today</p>
+                          <p className="font-bold text-xs font-mono tabular-nums text-zinc-850 dark:text-zinc-100 mt-1 leading-none">
                             {isMounted ? fmtMs(totalMs) : "00h 00m 00s"}
                           </p>
                         </div>
                       </div>
 
                       {todayPunches.length > 0 && (
-                        <div className="pt-1.5 border-t border-zinc-200 dark:border-zinc-800 text-[10px] text-zinc-450 space-y-1">
-                          <p className="font-extrabold uppercase text-[8px] tracking-wider text-zinc-400 mb-1">Today's Punch History:</p>
+                        <div className="pt-2 border-t border-zinc-200 dark:border-zinc-800/80 text-[10px] text-zinc-455 dark:text-zinc-500 space-y-1">
+                          <p className="font-bold uppercase text-[8px] tracking-wider text-zinc-400 mb-1 leading-none">Today's Punch History:</p>
                           {todayPunches.map((log, pIdx) => (
-                            <div key={log.id} className="flex justify-between items-center font-mono">
+                            <div key={log.id} className="flex justify-between items-center font-mono text-[9px]">
                               <span>Punch {pIdx + 1}:</span>
                               <span>{log.checkIn || "—"} → {log.checkOut || (log.status === "Clocked In" ? "now…" : "—")}</span>
                             </div>
@@ -1922,19 +2192,19 @@ export default function HRMSPortal({
                         <button
                           onClick={() => handleClockIn(selectedAdminEmp.id)}
                           disabled={isClocking}
-                          className="w-full py-2 bg-green-600 hover:bg-green-700 text-white font-bold text-[10px] uppercase tracking-wide cursor-pointer transition-colors flex items-center justify-center gap-1 disabled:opacity-50"
+                          className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-700 hover:to-green-600 text-white font-bold text-[10px] uppercase tracking-wide rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-xs"
                         >
-                          <Fingerprint className="h-3 w-3" />
-                          Check In Operator
+                          <Fingerprint className="h-3.5 w-3.5" />
+                          Check In Staff
                         </button>
                       ) : (
                         <button
                           onClick={() => handleClockOut(selectedAdminEmp.id)}
                           disabled={isClocking}
-                          className="w-full py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-[10px] uppercase tracking-wide cursor-pointer transition-colors flex items-center justify-center gap-1 disabled:opacity-50"
+                          className="w-full py-2.5 bg-gradient-to-r from-red-600 to-orange-550 hover:from-red-700 hover:to-orange-650 text-white font-bold text-[10px] uppercase tracking-wide rounded-lg cursor-pointer transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 shadow-xs"
                         >
-                          <Timer className="h-3 w-3" />
-                          Check Out Operator
+                          <Timer className="h-3.5 w-3.5" />
+                          Check Out Staff
                         </button>
                       )}
                     </div>
@@ -1942,41 +2212,41 @@ export default function HRMSPortal({
                 );
               })()}
 
-              {/* Submit Work Log on Behalf of Operator */}
-              <form onSubmit={handleAdminTimesheetSubmit} className="p-2.5 border border-zinc-200 dark:border-zinc-800 space-y-3">
-                <p className="text-zinc-500 font-bold uppercase text-[9px] tracking-wider flex items-center gap-1">
-                  <FileText className="h-3 w-3" /> Log Work on Behalf
+              {/* Submit Work Log on Behalf of Staff */}
+              <form onSubmit={handleAdminTimesheetSubmit} className="p-3 border border-zinc-200/60 dark:border-zinc-800 rounded-xl space-y-3.5">
+                <p className="text-zinc-450 dark:text-zinc-500 font-bold uppercase text-[9px] tracking-wider flex items-center gap-1.5 leading-none">
+                  <FileText className="h-3.5 w-3.5 text-zinc-400" /> Log Work on Behalf
                 </p>
 
-                <div className="space-y-2">
+                <div className="space-y-2.5">
                   {adminTimesheetEntries.map((row, idx) => (
                     <div key={idx} className="space-y-2.5">
-                      <div className="space-y-1">
-                        <label className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-550">Work Description</label>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-555">Work Description</label>
                         <textarea
                           required
                           rows={3}
-                          placeholder="Describe the work done by this operator..."
+                          placeholder="Describe the work done by this staff member..."
                           value={row.description}
                           onChange={e => {
                             const copy = [...adminTimesheetEntries];
                             copy[idx].description = e.target.value;
                             setAdminTimesheetEntries(copy);
                           }}
-                          className="w-full bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-850 rounded-none p-2 text-xs font-medium text-zinc-800 dark:text-zinc-200 resize-y focus:outline-none focus:border-zinc-400 transition-colors"
+                          className="w-full bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-xl p-2.5 text-xs font-semibold text-zinc-850 dark:text-zinc-200 resize-y focus:outline-none focus:border-amber-500 transition-colors placeholder-zinc-300 dark:placeholder-zinc-700"
                         />
                       </div>
 
                       {/* Proof photos upload */}
-                      <div className="space-y-1">
-                        <label className="text-[9px] uppercase font-bold text-zinc-400 dark:text-zinc-550">Proof Photos</label>
-                        <div className="flex flex-wrap gap-1.5 items-center">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-550">Proof Photos</label>
+                        <div className="flex flex-wrap gap-2 items-center">
                           {(row.images || []).map((imgUrl, imgIdx) => (
-                            <div key={imgIdx} className="relative group">
+                            <div key={imgIdx} className="relative group shrink-0">
                               <img
                                 src={imgUrl}
                                 alt="Proof"
-                                className="h-9 w-9 object-cover border border-zinc-250 dark:border-zinc-700 cursor-pointer hover:opacity-80 transition-opacity"
+                                className="h-10 w-10 object-cover rounded-lg border border-zinc-200 dark:border-zinc-700 cursor-pointer hover:opacity-85 transition-opacity"
                                 onClick={() => handleOpenPreview(row.images || [], imgIdx)}
                               />
                               <button
@@ -1986,14 +2256,14 @@ export default function HRMSPortal({
                                   copy[idx].images = (copy[idx].images || []).filter((_, i) => i !== imgIdx);
                                   setAdminTimesheetEntries(copy);
                                 }}
-                                className="absolute -top-1 -right-1 h-3.5 w-3.5 bg-red-500 text-white rounded-full text-[8px] flex items-center justify-center cursor-pointer"
+                                className="absolute -top-1 -right-1 h-3.5 w-3.5 bg-red-500 text-white rounded-full text-[8px] flex items-center justify-center cursor-pointer shadow-xs font-bold"
                               >
                                 ×
                               </button>
                             </div>
                           ))}
 
-                          <label className={`relative h-9 w-9 border-2 border-dashed border-zinc-300 dark:border-zinc-700 flex flex-col items-center justify-center cursor-pointer hover:border-zinc-500 transition-colors ${isUploading ? "opacity-50" : ""}`}>
+                          <label className={`relative h-10 w-10 border-2 border-dashed border-zinc-305 dark:border-zinc-700 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-zinc-500 transition-colors ${isUploading ? "opacity-50" : ""}`}>
                             <input
                               type="file"
                               accept="image/*"

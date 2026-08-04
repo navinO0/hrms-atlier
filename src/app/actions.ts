@@ -90,16 +90,20 @@ export async function logoutAction() {
   return { success: true };
 }
 
-export async function addEmployeeAction(name: string, code: string, department: string, designation: string, password?: string) {
+export async function addEmployeeAction(name: string, code: string, department: string, designation: string, password?: string, profilePhoto?: string) {
   let validatedPassword = "password";
+  let validatedProfilePhoto = null;
   try {
-    const validated = EmployeeSchema.parse({ name, code, department, designation, password });
+    const validated = EmployeeSchema.parse({ name, code, department, designation, password, profilePhoto });
     name = validated.name;
     code = validated.code;
     department = validated.department;
     designation = validated.designation;
     if (validated.password) {
       validatedPassword = validated.password;
+    }
+    if (validated.profilePhoto) {
+      validatedProfilePhoto = validated.profilePhoto;
     }
   } catch (err: any) {
     return { success: false, error: formatZodError(err) };
@@ -118,6 +122,7 @@ export async function addEmployeeAction(name: string, code: string, department: 
     department,
     designation,
     password: validatedPassword,
+    profilePhoto: validatedProfilePhoto,
   });
 
   revalidatePath("/");
@@ -130,14 +135,17 @@ export async function editEmployeeAction(
   code: string,
   department: string,
   designation: string,
-  password?: string
+  password?: string,
+  profilePhoto?: string
 ) {
+  let validatedProfilePhoto = null;
   try {
-    const validated = EmployeeSchema.parse({ name, code, department, designation, password });
+    const validated = EmployeeSchema.parse({ name, code, department, designation, password, profilePhoto });
     name = validated.name;
     code = validated.code;
     department = validated.department;
     designation = validated.designation;
+    validatedProfilePhoto = validated.profilePhoto || null;
   } catch (err: any) {
     return { success: false, error: formatZodError(err) };
   }
@@ -162,6 +170,7 @@ export async function editEmployeeAction(
     code: code.toUpperCase(),
     department,
     designation,
+    profilePhoto: validatedProfilePhoto,
   };
   if (password && password.trim() !== "") {
     updateFields.password = password.trim();
@@ -614,5 +623,32 @@ export async function resetDatabaseAction() {
   } catch (error: any) {
     console.error("resetDatabaseAction DB ERROR:", error);
     return { success: false, error: error.message || "Failed to reset database." };
+  }
+}
+
+export async function deleteEmployeeAction(id: string) {
+  try {
+    const session = await getSession();
+    if (!session || !session.isAuthenticated || session.authRole !== "Admin") {
+      return { success: false, error: "Unauthorized access." };
+    }
+    const emp = await Employee.findByPk(id);
+    if (!emp) {
+      return { success: false, error: "Employee not found." };
+    }
+
+    // Clean up associations first to prevent foreign key errors
+    await AttendanceLog.destroy({ where: { employeeId: id } });
+    await Timesheet.destroy({ where: { employeeId: id } });
+    await Assignment.destroy({ where: { employeeId: id } });
+    
+    // Delete the employee record itself
+    await emp.destroy();
+
+    revalidatePath("/");
+    return { success: true };
+  } catch (error: any) {
+    console.error("deleteEmployeeAction DB ERROR:", error);
+    return { success: false, error: error.message || "Failed to delete employee." };
   }
 }

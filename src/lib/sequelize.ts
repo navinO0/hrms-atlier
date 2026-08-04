@@ -69,6 +69,7 @@ export class Employee extends Model {
   declare department: string;
   declare designation: string;
   declare password: string;
+  declare profilePhoto?: string | null;
 }
 
 export class Order extends Model {
@@ -131,6 +132,7 @@ export function initModels(sequelize: Sequelize): void {
       department: { type: DataTypes.STRING, allowNull: false },
       designation: { type: DataTypes.STRING, allowNull: false },
       password: { type: DataTypes.STRING, allowNull: false, defaultValue: "password" },
+      profilePhoto: { type: DataTypes.TEXT, allowNull: true },
     },
     { sequelize, modelName: "Employee" }
   );

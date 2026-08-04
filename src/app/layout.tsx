@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 import type { Viewport } from "next";
 
 export const metadata: Metadata = {
-  title: "Boutique Staff Portal - Garment Production Management",
-  description: "Real-time employee biometrics, check-in log sheets, and timesheet management portal.",
+  title: "HRMS Portal",
+  description: "Boutique Human Resource Management System - Track daily attendance, log timesheets, and manage staff rosters.",
 };
 
 export const viewport: Viewport = {
