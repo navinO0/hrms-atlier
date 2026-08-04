@@ -220,6 +220,7 @@ export default function HRMSPortal({
   };
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [isClocking, setIsClocking] = useState<boolean>(false);
+  const [isSubmittingTimesheet, setIsSubmittingTimesheet] = useState<boolean>(false);
 
   // Live clock for the attendance card
   const [liveTime, setLiveTime] = useState<string>("");
@@ -562,7 +563,7 @@ export default function HRMSPortal({
     setManualCheckIn(log?.checkIn || "");
     setManualCheckOut(log?.checkOut || "");
     setAdminTimesheetDate(todayStr);
-    setAdminTimesheetEntries([{ orderId: "ord-1", description: "", hours: 4, images: [] }]);
+    setAdminTimesheetEntries([{ description: "", hours: 4, images: [] }]);
   };
 
   // Admin save manual attendance corrections
@@ -647,7 +648,7 @@ export default function HRMSPortal({
   // Admin: Submit / Update Timesheet on behalf of selected employee
   const handleAdminTimesheetSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedAdminEmp) return;
+    if (!selectedAdminEmp || isSubmittingTimesheet) return;
 
     // Validate entries
     const invalid = adminTimesheetEntries.some(t => !t.description.trim());
@@ -656,34 +657,32 @@ export default function HRMSPortal({
       return;
     }
 
+    setIsSubmittingTimesheet(true);
     const timeStr = new Date().toLocaleDateString() + " " + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    if (editingAdminTimesheetId) {
-      const res = await updateTimesheetAction(editingAdminTimesheetId, adminTimesheetDate, adminTimesheetEntries, timeStr + " (Updated)");
-      if (res.success && res.timesheet) {
-        setTimesheets(prev => prev.map(ts => ts.id === editingAdminTimesheetId ? (res.timesheet as unknown as Timesheet) : ts));
-        setEditingAdminTimesheetId(null);
-        setAdminTimesheetEntries([{ description: "", images: [] }]);
-        showToast(`Work log updated for ${selectedAdminEmp.name}!`, "success");
-      } else {
-        showToast((res.error || "Update failed."), "error");
-      }
-    } else {
-      const res = await submitTimesheetAction(selectedAdminEmp.id, adminTimesheetDate, adminTimesheetEntries, timeStr);
-      if (res.success && res.timesheet) {
-        setTimesheets(prev => [res.timesheet as unknown as Timesheet, ...prev]);
-        setAdminTimesheetEntries([{ description: "", images: [] }]);
-        showToast(`Work log submitted for ${selectedAdminEmp.name}!`, "success");
+    try {
+      if (editingAdminTimesheetId) {
+        const res = await updateTimesheetAction(editingAdminTimesheetId, adminTimesheetDate, adminTimesheetEntries, timeStr + " (Updated)");
+        if (res.success && res.timesheet) {
+          setTimesheets(prev => prev.map(ts => ts.id === editingAdminTimesheetId ? (res.timesheet as unknown as Timesheet) : ts));
+          showToast(`Work log updated for ${selectedAdminEmp.name}!`, "success");
+        } else {
+          showToast((res.error || "Update failed."), "error");
+        }
       } else {
         const res = await submitTimesheetAction(selectedAdminEmp.id, adminTimesheetDate, adminTimesheetEntries, timeStr);
         if (res.success && res.timesheet) {
           setTimesheets(prev => [res.timesheet as unknown as Timesheet, ...prev]);
-          setAdminTimesheetEntries([{ description: "", images: [] }]);
+          setEditingAdminTimesheetId(res.timesheet.id);
           showToast(`Work log submitted for ${selectedAdminEmp.name}!`, "success");
         } else {
           showToast((res.error || "Submit failed."), "error");
         }
       }
+    } catch (err: any) {
+      showToast(err.message || "An error occurred.", "error");
+    } finally {
+      setIsSubmittingTimesheet(false);
     }
   };
 
@@ -1195,7 +1194,7 @@ export default function HRMSPortal({
                           return (
                             <div key={dayStr} className="space-y-2 text-left">
                               {/* Date Group Header */}
-                              <div className="flex justify-between items-center bg-zinc-50 dark:bg-zinc-950 p-2.5 border border-zinc-200 dark:border-zinc-800 text-[10px] font-black uppercase tracking-wider text-zinc-400 dark:text-zinc-555 rounded-none">
+                              <div className="flex justify-between items-center bg-zinc-50 dark:bg-zinc-955 p-2.5 border border-zinc-200 dark:border-zinc-800 text-[10px] font-black uppercase tracking-wider text-zinc-400 dark:text-zinc-555 rounded-none">
                                 <span>{formatDateFriendly(dayStr)}</span>
                                 <span className="font-mono text-[9px] bg-zinc-200/50 dark:bg-zinc-800/85 px-2 py-0.5 text-zinc-650 dark:text-zinc-400 rounded-none">
                                   {dayTimesheets.length} Logs
@@ -1208,101 +1207,119 @@ export default function HRMSPortal({
                                 </div>
                               ) : (
                                 <div className="space-y-2">
-                                  {dayTimesheets.map(ts => {
-                                    const emp = employees.find(e => e.id === ts.employeeId);
-                                    const totalHrs = ts.entries.reduce((sum, e) => sum + e.hours, 0);
-                                    const isExpanded = !!expandedTimesheets[ts.id];
+                                  {(() => {
+                                    const groupedTimesheets: Record<string, Timesheet[]> = {};
+                                    dayTimesheets.forEach(ts => {
+                                      if (!groupedTimesheets[ts.employeeId]) {
+                                        groupedTimesheets[ts.employeeId] = [];
+                                      }
+                                      groupedTimesheets[ts.employeeId].push(ts);
+                                    });
 
-                                    return (
-                                      <div 
-                                        key={ts.id} 
-                                        className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm hover:border-zinc-350 dark:hover:border-zinc-700 transition-all duration-200 rounded-none"
-                                      >
-                                        {/* Collapsible Header Row */}
+                                    const employeeIds = Object.keys(groupedTimesheets);
+
+                                    return employeeIds.map(empId => {
+                                      const emp = employees.find(e => e.id === empId);
+                                      const empTimesheets = groupedTimesheets[empId];
+                                      
+                                      // Combine all entries from all timesheets of this employee on this date
+                                      const allEntries = empTimesheets.flatMap(ts => ts.entries || []);
+                                      const totalHrs = allEntries.reduce((sum, entry) => sum + (entry.hours || 0), 0);
+                                      
+                                      const collapseKey = `${dayStr}_${empId}`;
+                                      const isExpanded = !!expandedTimesheets[collapseKey];
+
+                                      return (
                                         <div 
-                                          onClick={() => setExpandedTimesheets(prev => ({ ...prev, [ts.id]: !prev[ts.id] }))}
-                                          className="p-3 flex items-center justify-between cursor-pointer select-none"
+                                          key={empId} 
+                                          className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm hover:border-zinc-350 dark:hover:border-zinc-700 transition-all duration-200 rounded-none"
                                         >
-                                          <div className="flex items-center gap-3">
-                                            {emp?.profilePhoto ? (
-                                              <img 
-                                                src={emp.profilePhoto} 
-                                                alt={emp.name} 
-                                                className="h-8 w-8 object-cover border border-zinc-200 dark:border-zinc-800 shrink-0 rounded-none" 
-                                              />
-                                            ) : (
-                                              <div className={`h-8 w-8 bg-gradient-to-br ${getAvatarBg(emp?.name || "")} text-white flex items-center justify-center font-bold text-[10px] shadow-2xs shrink-0 rounded-none`}>
-                                                {getInitials(emp?.name || "")}
+                                          {/* Collapsible Header Row */}
+                                          <div 
+                                            onClick={() => setExpandedTimesheets(prev => ({ ...prev, [collapseKey]: !prev[collapseKey] }))}
+                                            className="p-3 flex items-center justify-between cursor-pointer select-none"
+                                          >
+                                            <div className="flex items-center gap-3">
+                                              {emp?.profilePhoto ? (
+                                                <img 
+                                                  src={emp.profilePhoto} 
+                                                  alt={emp.name} 
+                                                  className="h-8 w-8 object-cover border border-zinc-200 dark:border-zinc-800 shrink-0 rounded-none" 
+                                                />
+                                              ) : (
+                                                <div className={`h-8 w-8 bg-gradient-to-br ${getAvatarBg(emp?.name || "")} text-white flex items-center justify-center font-bold text-[10px] shadow-2xs shrink-0 rounded-none`}>
+                                                  {getInitials(emp?.name || "")}
+                                                </div>
+                                              )}
+                                              <div>
+                                                <p className="font-bold text-xs sm:text-sm text-zinc-900 dark:text-zinc-50 leading-tight">
+                                                  {emp?.name}
+                                                </p>
+                                                <p className="text-[9px] text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider mt-0.5">
+                                                  {emp?.department || "Staff"} · {emp?.code}
+                                                </p>
                                               </div>
-                                            )}
-                                            <div>
-                                              <p className="font-bold text-xs sm:text-sm text-zinc-900 dark:text-zinc-50 leading-tight">
-                                                {emp?.name}
-                                              </p>
-                                              <p className="text-[9px] text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider mt-0.5">
-                                                {emp?.department || "Staff"} · {emp?.code}
-                                              </p>
+                                            </div>
+
+                                            <div className="flex items-center gap-3">
+                                              <span className="bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20 text-amber-700 dark:text-amber-400 px-2 py-0.5 font-bold text-xs font-mono rounded-none">
+                                                {totalHrs.toFixed(2)} Hrs
+                                              </span>
+                                              {isExpanded ? (
+                                                <ChevronUp className="h-4 w-4 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors" />
+                                              ) : (
+                                                <ChevronDown className="h-4 w-4 text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-200 transition-colors" />
+                                              )}
                                             </div>
                                           </div>
 
-                                          <div className="flex items-center gap-3">
-                                            <span className="bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20 text-amber-700 dark:text-amber-400 px-2 py-0.5 font-bold text-xs font-mono rounded-none">
-                                              {totalHrs.toFixed(2)} Hrs
-                                            </span>
-                                            {isExpanded ? (
-                                              <ChevronUp className="h-4 w-4 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors" />
-                                            ) : (
-                                              <ChevronDown className="h-4 w-4 text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-200 transition-colors" />
-                                            )}
-                                          </div>
-                                        </div>
-
-                                        {/* Expanded Body: Work Log details & images */}
-                                        {isExpanded && (
-                                          <div className="p-3 border-t border-zinc-150 dark:border-zinc-800/80 bg-zinc-50/30 dark:bg-zinc-950/20 space-y-2.5 animate-in slide-in-from-top-1 duration-150 rounded-none">
-                                            {ts.entries.map((entry, idx) => (
-                                              <div key={entry.id || idx} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-3 space-y-2 shadow-2xs rounded-none">
-                                                <div className="flex justify-between items-start gap-3">
-                                                  <div className="space-y-1 flex-1">
-                                                    {entry.orderId && (
-                                                      <span className="inline-flex px-1.5 py-0.5 bg-zinc-200/50 dark:bg-zinc-800/80 text-zinc-700 dark:text-zinc-300 font-mono text-[9px] font-bold tracking-wider mr-1.5 rounded-none">
-                                                        {entry.orderId}
-                                                      </span>
-                                                    )}
-                                                    <p className="text-xs text-zinc-750 dark:text-zinc-300 font-medium leading-relaxed">
-                                                      {entry.description}
-                                                    </p>
+                                          {/* Expanded Body: Work Log details & images */}
+                                          {isExpanded && (
+                                            <div className="p-3 border-t border-zinc-150 dark:border-zinc-800/80 bg-zinc-50/30 dark:bg-zinc-950/20 space-y-2.5 animate-in slide-in-from-top-1 duration-150 rounded-none">
+                                              {allEntries.map((entry, idx) => (
+                                                <div key={entry.id || idx} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-3 space-y-2 shadow-2xs rounded-none">
+                                                  <div className="flex justify-between items-start gap-3">
+                                                    <div className="space-y-1 flex-1">
+                                                      {entry.orderId && (
+                                                        <span className="inline-flex px-1.5 py-0.5 bg-zinc-200/50 dark:bg-zinc-800/80 text-zinc-700 dark:text-zinc-300 font-mono text-[9px] font-bold tracking-wider mr-1.5 rounded-none">
+                                                          {entry.orderId}
+                                                        </span>
+                                                      )}
+                                                      <p className="text-xs text-zinc-750 dark:text-zinc-300 font-medium leading-relaxed">
+                                                        {entry.description}
+                                                      </p>
+                                                    </div>
+                                                    <span className="font-mono font-bold text-xs text-zinc-900 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-955 px-2 py-0.5 border border-zinc-200 dark:border-zinc-800 shrink-0 rounded-none">
+                                                      {entry.hours} hr
+                                                    </span>
                                                   </div>
-                                                  <span className="font-mono font-bold text-xs text-zinc-900 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-950 px-2 py-0.5 border border-zinc-200 dark:border-zinc-800 shrink-0 rounded-none">
-                                                    {entry.hours} hr
-                                                  </span>
-                                                </div>
 
-                                                {/* Proof Images Gallery */}
-                                                {(entry.images || []).length > 0 && (
-                                                  <div className="flex flex-wrap gap-2 pt-1.5 border-t border-zinc-100 dark:border-zinc-800/50 mt-1.5">
-                                                    {(entry.images || []).map((imgUrl, imgIdx) => (
-                                                      <div key={imgIdx} className="relative group shrink-0">
-                                                        <img 
-                                                          src={imgUrl} 
-                                                          alt="Work proof" 
-                                                          className="h-12 w-12 object-cover border border-zinc-200 dark:border-zinc-800 cursor-pointer hover:scale-105 active:scale-95 transition-all shadow-xs rounded-none"
-                                                          onClick={() => handleOpenPreview(entry.images || [], imgIdx)}
-                                                        />
-                                                        <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none rounded-none">
-                                                          <Eye className="h-3.5 w-3.5 text-white" />
+                                                  {/* Proof Images Gallery */}
+                                                  {(entry.images || []).length > 0 && (
+                                                    <div className="flex flex-wrap gap-2 pt-1.5 border-t border-zinc-100 dark:border-zinc-800/50 mt-1.5">
+                                                      {(entry.images || []).map((imgUrl, imgIdx) => (
+                                                        <div key={imgIdx} className="relative group shrink-0">
+                                                          <img 
+                                                            src={imgUrl} 
+                                                            alt="Work proof" 
+                                                            className="h-12 w-12 object-cover border border-zinc-200 dark:border-zinc-800 cursor-pointer hover:scale-105 active:scale-95 transition-all shadow-xs rounded-none"
+                                                            onClick={() => handleOpenPreview(entry.images || [], imgIdx)}
+                                                          />
+                                                          <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none rounded-none">
+                                                            <Eye className="h-3.5 w-3.5 text-white" />
+                                                          </div>
                                                         </div>
-                                                      </div>
-                                                    ))}
-                                                  </div>
-                                                )}
-                                              </div>
-                                            ))}
-                                          </div>
-                                        )}
-                                      </div>
-                                    );
-                                  })}
+                                                      ))}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    });
+                                  })()}
                                 </div>
                               )}
                             </div>
@@ -1460,18 +1477,35 @@ export default function HRMSPortal({
                           />
                         </div>
                       </div>
-                      <button
-                        type="submit"
-                        disabled={isSavingEmployee}
-                        className="w-full bg-gradient-to-r from-zinc-900 to-zinc-800 hover:from-zinc-950 hover:to-zinc-850 dark:from-zinc-100 dark:to-zinc-200 dark:text-zinc-950 text-white font-bold h-10 rounded-xl text-xs cursor-pointer transition-all uppercase tracking-wide flex items-center justify-center gap-1.5 shadow-xs"
-                      >
-                        {isSavingEmployee && (
-                          <span className="h-3.5 w-3.5 border-2 border-white dark:border-zinc-900 border-t-transparent rounded-full animate-spin"></span>
-                        )}
-                        {isSavingEmployee 
-                          ? (editingEmployeeId ? "Saving..." : "Registering...") 
-                          : (editingEmployeeId ? "Save Changes" : "Register Staff")}
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          type="submit"
+                          disabled={isSavingEmployee}
+                          className="flex-1 bg-gradient-to-r from-zinc-900 to-zinc-800 hover:from-zinc-950 hover:to-zinc-850 dark:from-zinc-100 dark:to-zinc-200 dark:text-zinc-950 text-white font-bold h-10 rounded-xl text-xs cursor-pointer transition-all uppercase tracking-wide flex items-center justify-center gap-1.5 shadow-xs"
+                        >
+                          {isSavingEmployee && (
+                            <span className="h-3.5 w-3.5 border-2 border-white dark:border-zinc-900 border-t-transparent rounded-full animate-spin"></span>
+                          )}
+                          {isSavingEmployee 
+                            ? (editingEmployeeId ? "Saving..." : "Registering...") 
+                            : (editingEmployeeId ? "Save Changes" : "Register Staff")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingEmployeeId(null);
+                            setEmpFormName("");
+                            setEmpFormCode("");
+                            setEmpFormPassword("");
+                            setEmpFormPhoto("");
+                            setEmpFormDept("Stitching Section");
+                            setEmpFormDesg("");
+                          }}
+                          className="px-3.5 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 text-zinc-500 dark:text-zinc-400 font-bold h-10 rounded-xl text-xs cursor-pointer transition-all uppercase tracking-wide flex items-center justify-center shadow-xs"
+                        >
+                          Reset
+                        </button>
+                      </div>
                     </form>
                   </div>
                 </div>
@@ -2300,9 +2334,15 @@ export default function HRMSPortal({
 
                 <button 
                   type="submit" 
-                  className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-zinc-200 dark:text-zinc-900 font-bold text-[10px] uppercase tracking-wide cursor-pointer transition-colors shadow-xs"
+                  disabled={isSubmittingTimesheet}
+                  className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-zinc-200 dark:text-zinc-900 font-bold text-[10px] uppercase tracking-wide cursor-pointer transition-colors shadow-xs flex items-center justify-center gap-1.5 disabled:opacity-50"
                 >
-                  Submit Work Log
+                  {isSubmittingTimesheet && (
+                    <span className="h-3.5 w-3.5 border-2 border-white dark:border-zinc-900 border-t-transparent rounded-full animate-spin"></span>
+                  )}
+                  {isSubmittingTimesheet 
+                    ? (editingAdminTimesheetId ? "Updating..." : "Submitting...") 
+                    : (editingAdminTimesheetId ? "Update Work Log" : "Submit Work Log")}
                 </button>
               </form>
             </div>
