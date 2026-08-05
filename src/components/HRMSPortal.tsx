@@ -291,6 +291,8 @@ export default function HRMSPortal({
   };
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [isClocking, setIsClocking] = useState<boolean>(false);
+  const [clockingEmpId, setClockingEmpId] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isSubmittingTimesheet, setIsSubmittingTimesheet] = useState<boolean>(false);
 
   // Live clock for the attendance card
@@ -765,9 +767,10 @@ export default function HRMSPortal({
   // Employee: Clock-in / Clock-out (or Admin on behalf of employee)
   const handleClockIn = async (empId?: string) => {
     if (isClocking) return;
+    const targetEmpId = empId || activeEmpId;
     setIsClocking(true);
+    setClockingEmpId(targetEmpId);
     try {
-      const targetEmpId = empId || activeEmpId;
       const todayStr = getLocalTodayString();
       const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -795,14 +798,16 @@ export default function HRMSPortal({
       showToast("An error occurred during check in.", "error");
     } finally {
       setIsClocking(false);
+      setClockingEmpId(null);
     }
   };
 
   const handleClockOut = async (empId?: string) => {
     if (isClocking) return;
+    const targetEmpId = empId || activeEmpId;
     setIsClocking(true);
+    setClockingEmpId(targetEmpId);
     try {
-      const targetEmpId = empId || activeEmpId;
       const todayStr = getLocalTodayString();
       const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -833,6 +838,7 @@ export default function HRMSPortal({
       showToast("An error occurred during check out.", "error");
     } finally {
       setIsClocking(false);
+      setClockingEmpId(null);
     }
   };
 
@@ -1222,7 +1228,20 @@ export default function HRMSPortal({
     const todayStr = getLocalTodayString();
     return attendance
       .filter(a => a.employeeId === empId && a.date === todayStr)
-      .sort((a, b) => a.id.localeCompare(b.id));
+      .sort((a, b) => {
+        // Sort chronologically by checkIn time (parsed to seconds) so the
+        // latest punch is always the last element — regardless of UUID ordering.
+        const parseSecLocal = (t?: string): number => {
+          if (!t) return 0;
+          const m = t.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+          if (!m) return 0;
+          let h = parseInt(m[1]), min = parseInt(m[2]);
+          if (m[3].toUpperCase() === "PM" && h < 12) h += 12;
+          if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+          return h * 3600 + min * 60;
+        };
+        return parseSecLocal(a.checkIn) - parseSecLocal(b.checkIn);
+      });
   }, [attendance]);
 
   const getEmployeeLatestPunch = useCallback((empId: string) => {
@@ -1553,7 +1572,11 @@ export default function HRMSPortal({
                                 disabled={isClocking}
                                 className="cursor-pointer inline-flex items-center gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 bg-red-50 hover:bg-red-100/80 dark:bg-red-950/20 dark:hover:bg-red-950/45 border border-red-200 dark:border-red-900/40 text-red-650 hover:text-red-700 dark:text-red-400 font-black uppercase tracking-wider text-[8px] sm:text-[9px] rounded-xl transition-all shadow-3xs hover:scale-103 active:scale-97 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none select-none animate-in fade-in duration-100"
                               >
-                                <LogOut className="h-3 w-3 shrink-0" />
+                                {isClocking && clockingEmpId === emp.id ? (
+                                  <RotateCcw className="h-3 w-3 shrink-0 animate-spin text-red-655 dark:text-red-400" />
+                                ) : (
+                                  <LogOut className="h-3 w-3 shrink-0" />
+                                )}
                                 Check Out
                               </button>
                             ) : (
@@ -1562,7 +1585,11 @@ export default function HRMSPortal({
                                 disabled={isClocking}
                                 className="cursor-pointer inline-flex items-center gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 bg-emerald-50 hover:bg-emerald-100/80 dark:bg-emerald-950/20 dark:hover:bg-emerald-950/45 border border-emerald-250 dark:border-emerald-900/40 text-emerald-650 hover:text-emerald-700 dark:text-emerald-400 font-black uppercase tracking-wider text-[8px] sm:text-[9px] rounded-xl transition-all shadow-3xs hover:scale-103 active:scale-97 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none select-none animate-in fade-in duration-100"
                               >
-                                <Fingerprint className="h-3 w-3 shrink-0" />
+                                {isClocking && clockingEmpId === emp.id ? (
+                                  <RotateCcw className="h-3 w-3 shrink-0 animate-spin text-emerald-650 dark:text-emerald-400" />
+                                ) : (
+                                  <Fingerprint className="h-3 w-3 shrink-0" />
+                                )}
                                 Check In
                               </button>
                             )}
@@ -2223,7 +2250,22 @@ export default function HRMSPortal({
                     <h3 className="font-bold text-sm text-zinc-900 dark:text-zinc-105 flex items-center gap-2">
                       <Banknote className="h-4 w-4 text-amber-500" /> Pending Payroll Calculator
                     </h3>
-                    <span className="text-[10px] font-mono text-zinc-400">Real-Time Accruals</span>
+                    <div className="flex items-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsRefreshing(true);
+                          window.location.reload();
+                        }}
+                        disabled={isRefreshing}
+                        className="cursor-pointer inline-flex items-center gap-1 px-2.5 py-1 text-[9px] font-bold text-zinc-650 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 border border-zinc-200 dark:border-zinc-800 rounded-lg transition-all hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50 select-none"
+                        title="Refresh Payroll Data"
+                      >
+                        <RotateCcw className={`h-3 w-3 ${isRefreshing ? "animate-spin text-amber-500" : ""}`} />
+                        <span>Refresh</span>
+                      </button>
+                      <span className="text-[10px] font-mono text-zinc-400 hidden sm:inline">Real-Time Accruals</span>
+                    </div>
                   </div>
 
                   {employees.length === 0 ? (
@@ -3083,7 +3125,11 @@ export default function HRMSPortal({
                       disabled={isClocking}
                       className="w-full py-3.5 bg-gradient-to-r from-red-600 to-orange-500 hover:from-red-700 hover:to-orange-600 text-white font-bold rounded-xl cursor-pointer transition-all uppercase tracking-widest text-[10px] sm:text-xs flex items-center justify-center gap-2 shadow-md shadow-red-650/10 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Timer className="h-4 w-4" />
+                      {isClocking && clockingEmpId === activeEmpId ? (
+                        <RotateCcw className="h-4 w-4 animate-spin text-white" />
+                      ) : (
+                        <Timer className="h-4 w-4" />
+                      )}
                       {isClocking ? "Checking Out..." : "Clock Out / Check Out"}
                     </button>
                   ) : (
@@ -3093,7 +3139,11 @@ export default function HRMSPortal({
                       disabled={isClocking}
                       className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-green-500 hover:from-emerald-700 hover:to-green-600 text-white font-bold rounded-xl cursor-pointer transition-all uppercase tracking-widest text-[10px] sm:text-xs flex items-center justify-center gap-2 shadow-md shadow-emerald-650/10 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Fingerprint className="h-4 w-4" />
+                      {isClocking && clockingEmpId === activeEmpId ? (
+                        <RotateCcw className="h-4 w-4 animate-spin text-white" />
+                      ) : (
+                        <Fingerprint className="h-4 w-4" />
+                      )}
                       {isClocking ? "Checking In..." : "Clock In / Check In"}
                     </button>
                   )}
