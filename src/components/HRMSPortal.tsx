@@ -1224,6 +1224,14 @@ export default function HRMSPortal({
     return `${sec}s`;
   };
 
+  const formatHoursToHm = (hoursNum: number): string => {
+    const totalMinutes = Math.round(hoursNum * 60);
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    return `${h} Hrs ${m} Min`;
+  };
+
+
   const getEmployeeTodayPunches = useCallback((empId: string) => {
     const todayStr = getLocalTodayString();
     return attendance
@@ -1762,7 +1770,29 @@ export default function HRMSPortal({
                                       
                                       // Combine all entries from all timesheets of this employee on this date
                                       const allEntries = empTimesheets.flatMap(ts => ts.entries || []);
-                                      const totalHrs = allEntries.reduce((sum, entry) => sum + (entry.hours || 0), 0);
+                                      
+                                      // Calculate actual worked seconds from attendance logs on this specific dayStr
+                                      const dayAttendance = attendance.filter(a => a.employeeId === empId && a.date === dayStr);
+                                      let totalSec = 0;
+                                      dayAttendance.forEach(a => {
+                                        const inSec = parseTimeSec(a.checkIn);
+                                        if (inSec === null) return;
+                                        let outSec = parseTimeSec(a.checkOut);
+                                        if (outSec === null) {
+                                          const isToday = dayStr === getLocalTodayString();
+                                          if (isToday) {
+                                            const now = new Date();
+                                            outSec = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+                                          }
+                                        }
+                                        if (outSec !== null) {
+                                          totalSec += Math.max(0, outSec - inSec);
+                                        }
+                                      });
+                                      
+                                      const displayHours = Math.floor(totalSec / 3600);
+                                      const displayMins = Math.floor((totalSec % 3600) / 60);
+                                      const workedText = `${displayHours} Hrs ${displayMins} Min`;
                                       
                                       const collapseKey = `${dayStr}_${empId}`;
                                       const isExpanded = !!expandedTimesheets[collapseKey];
@@ -1801,7 +1831,7 @@ export default function HRMSPortal({
 
                                             <div className="flex items-center gap-3">
                                               <span className="bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20 text-amber-700 dark:text-amber-400 px-2 py-0.5 font-bold text-xs font-mono rounded-none">
-                                                {totalHrs.toFixed(2)} Hrs
+                                                {workedText}
                                               </span>
                                               {isExpanded ? (
                                                 <ChevronUp className="h-4 w-4 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors" />
@@ -1828,7 +1858,7 @@ export default function HRMSPortal({
                                                       </p>
                                                     </div>
                                                     <span className="font-mono font-bold text-xs text-zinc-900 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-955 px-2 py-0.5 border border-zinc-200 dark:border-zinc-800 shrink-0 rounded-none">
-                                                      {entry.hours} hr
+                                                      {formatHoursToHm(entry.hours || 0)}
                                                     </span>
                                                   </div>
 
@@ -2311,23 +2341,23 @@ export default function HRMSPortal({
                               </div>
                               <div>
                                 <span className="text-zinc-400 block text-[9px] uppercase font-sans">Gross Hours</span>
-                                <span className="font-bold text-zinc-800 dark:text-zinc-200">{calc.totalGrossHours} hr</span>
+                                <span className="font-bold text-zinc-800 dark:text-zinc-200">{formatHoursToHm(calc.totalGrossHours)}</span>
                               </div>
                               <div>
                                 <span className="text-zinc-400 block text-[9px] uppercase font-sans">Break Excl.</span>
-                                <span className="font-bold text-red-500">-{calc.totalLunchDeductions} hr</span>
+                                <span className="font-bold text-red-500">-{formatHoursToHm(calc.totalLunchDeductions)}</span>
                               </div>
                               <div>
                                 <span className="text-zinc-400 block text-[9px] uppercase font-sans">Regular Hours</span>
-                                <span className="font-bold text-zinc-800 dark:text-zinc-200">{calc.totalRegularHours} hr</span>
+                                <span className="font-bold text-zinc-800 dark:text-zinc-200">{formatHoursToHm(calc.totalRegularHours)}</span>
                               </div>
                               <div>
                                 <span className="text-zinc-400 block text-[9px] uppercase font-sans">Overtime</span>
-                                <span className="font-bold text-amber-600 dark:text-amber-505">+{calc.totalOvertimeHours} hr</span>
+                                <span className="font-bold text-amber-600 dark:text-amber-505">+{formatHoursToHm(calc.totalOvertimeHours)}</span>
                               </div>
                               <div>
                                 <span className="text-zinc-400 block text-[9px] uppercase font-sans">Net Paid Hours</span>
-                                <span className="font-bold text-emerald-600 dark:text-emerald-400">{calc.totalNetHours} hr</span>
+                                <span className="font-bold text-emerald-600 dark:text-emerald-400">{formatHoursToHm(calc.totalNetHours)}</span>
                               </div>
                             </div>
 
@@ -2593,23 +2623,23 @@ export default function HRMSPortal({
                         </div>
                         <div className="flex justify-between">
                           <span className="font-sans text-zinc-500">Gross Hours:</span>
-                          <span>{calc.totalGrossHours} hrs</span>
+                          <span>{formatHoursToHm(calc.totalGrossHours)}</span>
                         </div>
                         <div className="flex justify-between text-red-500">
                           <span className="font-sans text-zinc-500">Break Exclusion:</span>
-                          <span>-{calc.totalLunchDeductions} hrs ({emp.breakTime || 60} mins/day)</span>
+                          <span>-{formatHoursToHm(calc.totalLunchDeductions)} ({emp.breakTime || 60} mins/day)</span>
                         </div>
                         <div className="flex justify-between text-zinc-650 dark:text-zinc-400">
                           <span className="font-sans">Regular Hours:</span>
-                          <span>{calc.totalRegularHours} hrs</span>
+                          <span>{formatHoursToHm(calc.totalRegularHours)}</span>
                         </div>
                         <div className="flex justify-between text-amber-600 dark:text-amber-500 font-semibold">
                           <span className="font-sans">Overtime Hours:</span>
-                          <span>+{calc.totalOvertimeHours} hrs</span>
+                          <span>+{formatHoursToHm(calc.totalOvertimeHours)}</span>
                         </div>
                         <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-bold border-t border-amber-500/20 pt-1 mt-1">
                           <span className="font-sans">Net Paid Hours:</span>
-                          <span>{calc.totalNetHours} hrs</span>
+                          <span>{formatHoursToHm(calc.totalNetHours)}</span>
                         </div>
                         <div className="flex justify-between text-amber-600 dark:text-amber-400 font-black text-sm border-t border-amber-500/30 pt-1 mt-1">
                           <span className="font-sans">Total Amount Payable:</span>
@@ -3352,10 +3382,10 @@ export default function HRMSPortal({
                   {/* Summary stats */}
                   <div className="text-right flex items-center gap-2 bg-zinc-50 dark:bg-zinc-950 px-3 py-1.5 rounded-xl border border-zinc-150 dark:border-zinc-850 shadow-xs">
                     <div>
-                      <p className="text-lg font-black text-zinc-900 dark:text-zinc-50 font-mono tabular-nums leading-none">
-                        {employeeTimesheets.reduce((s, ts) => s + ts.entries.reduce((es, e) => es + e.hours, 0), 0).toFixed(1)}
+                      <p className="text-xs font-black text-zinc-900 dark:text-zinc-50 font-mono tabular-nums leading-none">
+                        {formatHoursToHm(employeeTimesheets.reduce((s, ts) => s + ts.entries.reduce((es, e) => es + e.hours, 0), 0))}
                       </p>
-                      <p className="text-[8px] text-zinc-400 dark:text-zinc-500 uppercase font-bold tracking-wider mt-1 text-center">Total Hrs</p>
+                      <p className="text-[8px] text-zinc-400 dark:text-zinc-500 uppercase font-bold tracking-wider mt-1 text-center">Total Worked</p>
                     </div>
                   </div>
                 </div>
@@ -3405,8 +3435,8 @@ export default function HRMSPortal({
                               </div>
                             </div>
                             <div className="flex items-center gap-3 shrink-0">
-                              <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100 font-mono bg-zinc-50 dark:bg-zinc-950 px-2 py-0.5 border border-zinc-150 dark:border-zinc-850 rounded-lg">
-                                {totalHours.toFixed(1)}<span className="text-[9px] text-zinc-400 font-bold ml-0.5">h</span>
+                              <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100 font-mono bg-zinc-50 dark:bg-zinc-955 px-2 py-0.5 border border-zinc-150 dark:border-zinc-850 rounded-lg">
+                                {formatHoursToHm(totalHours)}
                               </span>
                               {isExpanded
                                 ? <ChevronUp className="h-4 w-4 text-zinc-400" />
@@ -3470,7 +3500,7 @@ export default function HRMSPortal({
                               {/* Edit button — only today's logs */}
                               {isToday && (
                                 <div className="pt-3 border-t border-dashed border-zinc-200 dark:border-zinc-800/80 flex justify-between items-center">
-                                  <span className="text-[10px] text-zinc-400 dark:text-zinc-500">Total: <strong className="text-zinc-700 dark:text-zinc-300 font-mono">{totalHours}h</strong></span>
+                                  <span className="text-[10px] text-zinc-400 dark:text-zinc-500">Total: <strong className="text-zinc-700 dark:text-zinc-300 font-mono">{formatHoursToHm(totalHours)}</strong></span>
                                   <button
                                     onClick={() => {
                                       handleStartEditTimesheet(ts);
