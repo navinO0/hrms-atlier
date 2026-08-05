@@ -1008,12 +1008,62 @@ export default function HRMSPortal({
   const calculateEmpPayDetails = useCallback((emp: Employee) => {
     const empLogs = attendance.filter(a => a.employeeId === emp.id);
 
-    // Unpaid logs: date/timestamp after emp.lastPaidAt
+    // A helper to parse checkIn/checkOut time with log date into a local Date object
+    const parseDateTime = (dateStr: string, timeStr?: string): Date | null => {
+      if (!timeStr) return null;
+      const match = timeStr.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+      if (!match) return null;
+      let [_, hours, minutes, ampm] = match;
+      let h = parseInt(hours, 10);
+      const m = parseInt(minutes, 10);
+      if (ampm.toUpperCase() === "PM" && h < 12) h += 12;
+      if (ampm.toUpperCase() === "AM" && h === 12) h = 0;
+
+      const parts = dateStr.split('-');
+      if (parts.length !== 3) return null;
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1; // 0-indexed
+      const day = parseInt(parts[2], 10);
+
+      return new Date(year, month, day, h, m, 0, 0);
+    };
+
+    // Calculate exact unpaid hours for a single log based on emp.lastPaidAt
+    const getUnpaidHoursForLog = (l: typeof attendance[0]): number => {
+      if (!l.checkIn) return 0;
+      const inTime = parseDateTime(l.date, l.checkIn);
+      if (!inTime) return 0;
+
+      let outTime = parseDateTime(l.date, l.checkOut);
+      if (!outTime) {
+        // If currently clocked in, we use current time for calculations
+        outTime = new Date();
+      }
+
+      if (!emp.lastPaidAt) {
+        const diffMs = outTime.getTime() - inTime.getTime();
+        return diffMs > 0 ? parseFloat((diffMs / 3600000).toFixed(2)) : 0;
+      }
+
+      const lastPaidTime = new Date(emp.lastPaidAt);
+
+      if (outTime.getTime() <= lastPaidTime.getTime()) {
+        return 0;
+      }
+
+      if (inTime.getTime() >= lastPaidTime.getTime()) {
+        const diffMs = outTime.getTime() - inTime.getTime();
+        return diffMs > 0 ? parseFloat((diffMs / 3600000).toFixed(2)) : 0;
+      }
+
+      // Partial unpaid: from lastPaidTime to outTime
+      const diffMs = outTime.getTime() - lastPaidTime.getTime();
+      return diffMs > 0 ? parseFloat((diffMs / 3600000).toFixed(2)) : 0;
+    };
+
+    // Unpaid logs: has unpaid hours
     const unpaidLogs = empLogs.filter(a => {
-      if (!emp.lastPaidAt) return true;
-      const logDate = a.date;
-      const lastPaidDate = emp.lastPaidAt.split('T')[0];
-      return logDate > lastPaidDate;
+      return getUnpaidHoursForLog(a) > 0;
     });
 
     const logsByDate: Record<string, typeof attendance> = {};
@@ -1038,7 +1088,7 @@ export default function HRMSPortal({
       const dayLogs = logsByDate[d];
       let dayGross = 0;
       dayLogs.forEach(l => {
-        dayGross += calculateHoursFromAttendance(l.checkIn, l.checkOut);
+        dayGross += getUnpaidHoursForLog(l);
       });
 
       if (dayGross > 0) {
@@ -1404,12 +1454,11 @@ export default function HRMSPortal({
             
             {/* Admin TAB: Attendance Logs */}
             {adminTab === "status" && (
-              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-none overflow-hidden shadow-xs text-left animate-in fade-in duration-200">
-                <div className="flex justify-between items-center px-3.5 py-3 border-b border-zinc-150 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-955/20">
-                  <span className="font-bold text-xs text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Daily Attendance</span>
-                  <span className="text-[9px] text-amber-600 dark:text-amber-400 font-bold bg-amber-500/10 px-2 py-0.5 animate-pulse">Click card to manage</span>
+              <div className="space-y-3 sm:space-y-4">
+                <div className="flex justify-between items-center px-1">
+                  <span className="font-black text-[10px] text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">Live Attendance Feed</span>
                 </div>
-                <div className="p-3 sm:p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   {employees.map(emp => {
                     const todayPunches = getEmployeeTodayPunches(emp.id);
                     const latestLog = getEmployeeLatestPunch(emp.id);
@@ -1419,72 +1468,102 @@ export default function HRMSPortal({
                       <div 
                         key={emp.id} 
                         onClick={() => handleSelectAdminEmp(emp)}
-                        className="border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-3 flex flex-col justify-between hover:border-zinc-350 dark:hover:border-zinc-700 cursor-pointer transition-all space-y-3 rounded-none shadow-xs"
+                        className="relative border border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-3 sm:p-4.5 rounded-2xl shadow-xs hover:shadow-md hover:border-amber-500/50 transition-all duration-250 cursor-pointer flex flex-col justify-between gap-3 sm:gap-4 group"
                       >
-                        {/* Upside: Profile and Name */}
-                        <div className="flex items-center gap-3">
-                          {emp.profilePhoto ? (
-                            <img 
-                              src={emp.profilePhoto} 
-                              alt={emp.name} 
-                              className="h-9 w-9 object-cover border border-zinc-200 dark:border-zinc-800 shrink-0 rounded-none" 
-                            />
-                          ) : (
-                            <div className={`h-9 w-9 bg-gradient-to-br ${getAvatarBg(emp.name)} text-white flex items-center justify-center font-bold text-xs shadow-xs shrink-0 rounded-none`}>
-                              {getInitials(emp.name)}
+                        {/* Top Section: Profile Info and Status */}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-2.5 sm:gap-3.5">
+                            {emp.profilePhoto ? (
+                              <img 
+                                src={emp.profilePhoto} 
+                                alt={emp.name} 
+                                className="h-9 w-9 sm:h-11 sm:w-11 object-cover border border-zinc-150 dark:border-zinc-800 shrink-0 rounded-xl shadow-3xs group-hover:scale-105 transition-transform duration-250" 
+                              />
+                            ) : (
+                              <div className={`h-9 w-9 sm:h-11 sm:w-11 bg-gradient-to-br ${getAvatarBg(emp.name)} text-white flex items-center justify-center font-bold text-xs shadow-3xs shrink-0 rounded-xl group-hover:scale-105 transition-transform duration-250`}>
+                                {getInitials(emp.name)}
+                              </div>
+                            )}
+                            <div className="space-y-0.5">
+                              <p className="font-extrabold text-zinc-900 dark:text-zinc-50 leading-snug text-xs sm:text-sm group-hover:text-amber-500 transition-colors duration-200">{emp.name}</p>
+                              <p className="text-[9px] sm:text-[10px] text-zinc-405 dark:text-zinc-500 font-mono leading-none">
+                                {emp.code} · {emp.designation}
+                              </p>
                             </div>
-                          )}
-                          <div>
-                            <p className="font-bold text-zinc-900 dark:text-zinc-100 leading-tight text-xs">{emp.name}</p>
-                            <p className="text-[9px] text-zinc-405 dark:text-zinc-500 font-mono mt-0.5">
-                              {emp.code} · {emp.designation}
-                            </p>
                           </div>
+
+                          {/* Status Badge */}
+                          <span className={`inline-flex items-center rounded-lg px-2 py-0.5 sm:px-2.5 sm:py-1 text-[8px] sm:text-[9px] font-black uppercase tracking-wider border shadow-3xs ${
+                            isCurrentlyClockedIn
+                              ? "bg-green-500/10 text-green-700 border-green-500/20 dark:text-green-400"
+                              : todayPunches.length > 0
+                              ? "bg-zinc-100 dark:bg-zinc-800/80 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700"
+                              : "bg-red-500/10 text-red-655 border-red-500/20 dark:text-red-400"
+                          }`}>
+                            <span className={`h-1.5 w-1.5 rounded-full mr-1 sm:mr-1.5 ${
+                              isCurrentlyClockedIn ? "bg-green-500 animate-pulse" : todayPunches.length > 0 ? "bg-zinc-400" : "bg-red-500"
+                            }`} />
+                            {isCurrentlyClockedIn ? "Active" : todayPunches.length > 0 ? "Offline" : "Absent"}
+                          </span>
                         </div>
 
-                        {/* Downside: Clocking Time, Action Buttons, and Status */}
-                        <div className="pt-2.5 border-t border-dashed border-zinc-155 dark:border-zinc-805 flex items-center justify-between gap-2.5">
-                          {/* Checked In Time */}
-                          <div className="text-[9px] sm:text-[10px] text-zinc-500 dark:text-zinc-400 font-mono leading-tight">
+                        {/* Bottom Section: Clocking metrics and Action button */}
+                        <div className="pt-2 sm:pt-3 border-t border-dashed border-zinc-155 dark:border-zinc-800 flex items-center justify-between gap-3 sm:gap-4">
+                          {/* Metrics Info */}
+                          <div className="flex flex-wrap gap-x-3 sm:gap-x-4 gap-y-1 flex-1">
                             {todayPunches.length > 0 ? (
-                              <div className="space-y-0.5">
-                                <p><span className="font-bold text-zinc-405 uppercase">In:</span> {todayPunches[0].checkIn}</p>
-                                {todayPunches[0].checkOut && <p><span className="font-bold text-zinc-450 uppercase">Out:</span> {todayPunches[0].checkOut}</p>}
-                              </div>
+                              <>
+                                <div className="space-y-0.5">
+                                  <span className="text-[8px] uppercase font-black text-zinc-400 dark:text-zinc-500 block tracking-wider leading-none">In</span>
+                                  <span className="font-mono text-[9px] sm:text-[9.5px] font-bold text-zinc-700 dark:text-zinc-350">{todayPunches[0].checkIn}</span>
+                                </div>
+                                {(() => {
+                                  const lastCheckOut = [...todayPunches].reverse().find(p => p.checkOut)?.checkOut;
+                                  if (lastCheckOut) {
+                                    return (
+                                      <div className="space-y-0.5">
+                                        <span className="text-[8px] uppercase font-black text-zinc-400 dark:text-zinc-500 block tracking-wider leading-none">Out</span>
+                                        <span className="font-mono text-[9px] sm:text-[9.5px] font-bold text-zinc-700 dark:text-zinc-350">{lastCheckOut}</span>
+                                      </div>
+                                    );
+                                  }
+                                  return null;
+                                })()}
+                                <div className="space-y-0.5">
+                                  <span className="text-[8px] uppercase font-black text-zinc-400 dark:text-zinc-500 block tracking-wider leading-none">
+                                    {isCurrentlyClockedIn ? "Active" : "Worked"}
+                                  </span>
+                                  <span className="font-mono text-[9px] sm:text-[9.5px] font-bold text-zinc-900 dark:text-zinc-150">
+                                    {isMounted ? fmtMs(getEmployeeEffectiveMsToday(emp.id)) : "00s"}
+                                  </span>
+                                </div>
+                              </>
                             ) : (
-                              <p className="text-zinc-305 dark:text-zinc-700 font-semibold italic">No check-in logs</p>
+                              <span className="text-[9px] sm:text-[10px] text-zinc-350 dark:text-zinc-650 font-bold italic py-0.5">
+                                No check-in logs today
+                              </span>
                             )}
                           </div>
 
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {/* Status Badge */}
-                            <span className={`inline-flex items-center rounded-none px-1.5 py-0.5 text-[8px] sm:text-[9px] font-bold uppercase tracking-wider border ${
-                              isCurrentlyClockedIn
-                                ? "bg-green-500/10 text-green-700 border-green-500/20 dark:text-green-400"
-                                : todayPunches.length > 0
-                                ? "bg-zinc-100 dark:bg-zinc-800 text-zinc-555 border-zinc-200 dark:border-zinc-700 dark:text-zinc-400"
-                                : "bg-red-500/10 text-red-650 border-red-500/20 dark:text-red-400"
-                            }`}>
-                              <span className={`h-1.5 w-1.5 rounded-none mr-1 ${
-                                isCurrentlyClockedIn ? "bg-green-500 animate-pulse" : todayPunches.length > 0 ? "bg-zinc-400" : "bg-red-500"
-                              }`} />
-                              {isCurrentlyClockedIn ? "Active" : todayPunches.length > 0 ? "Offline" : "Absent"}
-                            </span>
-
-                            {/* Action Button */}
+                          {/* Action Button */}
+                          <div className="shrink-0">
                             {isCurrentlyClockedIn ? (
                               <button
                                 onClick={(e) => { e.stopPropagation(); if (!isClocking) handleClockOut(emp.id); }}
-                                className="cursor-pointer inline-flex px-1.5 py-0.5 border border-red-200 dark:border-red-900/50 hover:bg-red-550/10 text-red-500 hover:text-red-650 font-bold uppercase tracking-wider text-[8px] rounded-none transition-colors select-none"
+                                disabled={isClocking}
+                                className="cursor-pointer inline-flex items-center gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 bg-red-50 hover:bg-red-100/80 dark:bg-red-950/20 dark:hover:bg-red-950/45 border border-red-200 dark:border-red-900/40 text-red-650 hover:text-red-700 dark:text-red-400 font-black uppercase tracking-wider text-[8px] sm:text-[9px] rounded-xl transition-all shadow-3xs hover:scale-103 active:scale-97 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none select-none animate-in fade-in duration-100"
                               >
-                                {isClocking ? "…" : "Check Out"}
+                                <LogOut className="h-3 w-3 shrink-0" />
+                                Check Out
                               </button>
                             ) : (
                               <button
                                 onClick={(e) => { e.stopPropagation(); if (!isClocking) handleClockIn(emp.id); }}
-                                className="cursor-pointer inline-flex px-1.5 py-0.5 border border-green-200 dark:border-green-900/50 hover:bg-green-550/10 text-green-600 hover:text-green-700 font-bold uppercase tracking-wider text-[8px] rounded-none transition-colors select-none"
+                                disabled={isClocking}
+                                className="cursor-pointer inline-flex items-center gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 bg-emerald-50 hover:bg-emerald-100/80 dark:bg-emerald-950/20 dark:hover:bg-emerald-950/45 border border-emerald-250 dark:border-emerald-900/40 text-emerald-650 hover:text-emerald-700 dark:text-emerald-400 font-black uppercase tracking-wider text-[8px] sm:text-[9px] rounded-xl transition-all shadow-3xs hover:scale-103 active:scale-97 disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none select-none animate-in fade-in duration-100"
                               >
-                                {isClocking ? "…" : "Check In"}
+                                <Fingerprint className="h-3 w-3 shrink-0" />
+                                Check In
                               </button>
                             )}
                           </div>
@@ -3071,7 +3150,12 @@ export default function HRMSPortal({
                       <span className="text-zinc-300 dark:text-zinc-700">|</span>
                       <span className="flex items-center gap-1.5">
                         <Timer className="h-3.5 w-3.5 text-red-400" />
-                        Last Out: <span className="text-zinc-705 dark:text-zinc-300 font-mono ml-0.5">{latestTodayLog?.checkOut || (isCurrentlyClocked ? "Active" : "—")}</span>
+                        Last Out: <span className="text-zinc-705 dark:text-zinc-300 font-mono ml-0.5">
+                          {(() => {
+                            const lastCheckOut = [...todayAttendanceLogs].reverse().find(p => p.checkOut)?.checkOut;
+                            return lastCheckOut || (isCurrentlyClocked ? "Active" : "—");
+                          })()}
+                        </span>
                       </span>
                       <span className="text-zinc-300 dark:text-zinc-700">|</span>
                       <span className="text-zinc-705 dark:text-zinc-300 font-mono flex items-center gap-1">
