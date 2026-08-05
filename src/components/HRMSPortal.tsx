@@ -2303,65 +2303,121 @@ export default function HRMSPortal({
                     }
 
                     return (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse font-sans text-xs">
-                          <thead>
-                            <tr className="bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 text-[10px] font-black uppercase tracking-wider text-zinc-400">
-                              <th className="p-2.5">Date Paid</th>
-                              <th className="p-2.5">Staff Member</th>
-                              <th className="p-2.5">Pay Structure</th>
-                              <th className="p-2.5">Gross / Net Hours</th>
-                              <th className="p-2.5">Paid Amount</th>
-                              <th className="p-2.5">Notes</th>
-                              <th className="p-2.5 text-right">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
-                            {filteredRecords.map(pr => {
-                              const emp = pr.employee || employees.find(e => e.id === pr.employeeId);
-                              const paidDateFormatted = pr.paidAt ? new Date(pr.paidAt).toLocaleDateString("en-US", {
-                                month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit"
-                              }) : pr.periodEnd;
+                      <div className="space-y-3">
+                        {/* Desktop Table View */}
+                        <div className="hidden md:block overflow-x-auto">
+                          <table className="w-full text-left border-collapse font-sans text-xs">
+                            <thead>
+                              <tr className="bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 text-[10px] font-black uppercase tracking-wider text-zinc-400">
+                                <th className="p-2.5">Date Paid</th>
+                                <th className="p-2.5">Staff Member</th>
+                                <th className="p-2.5">Pay Structure</th>
+                                <th className="p-2.5">Gross / Net Hours</th>
+                                <th className="p-2.5">Paid Amount</th>
+                                <th className="p-2.5">Notes</th>
+                                <th className="p-2.5 text-right">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+                              {filteredRecords.map(pr => {
+                                const emp = pr.employee || employees.find(e => e.id === pr.employeeId);
+                                const paidDateFormatted = pr.paidAt ? new Date(pr.paidAt).toLocaleDateString("en-US", {
+                                  month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit"
+                                }) : pr.periodEnd;
 
-                              return (
-                                <tr key={pr.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30">
-                                  <td className="p-2.5 font-mono text-[10px] text-zinc-505 dark:text-zinc-400 whitespace-nowrap">
-                                    {paidDateFormatted}
-                                  </td>
-                                  <td className="p-2.5 font-bold text-zinc-900 dark:text-zinc-105">
-                                    <div className="flex items-center gap-2">
-                                      {emp?.profilePhoto ? (
-                                        <img src={emp.profilePhoto} alt={emp.name} className="h-6 w-6 object-cover border border-zinc-200 dark:border-zinc-800" />
-                                      ) : (
-                                        <div className={`h-6 w-6 bg-gradient-to-br ${getAvatarBg(emp?.name || "")} text-white flex items-center justify-center font-bold text-[9px]`}>
-                                          {getInitials(emp?.name || "")}
-                                        </div>
-                                      )}
-                                      <span>{emp?.name || pr.employeeId} <span className="text-[9px] text-zinc-400 font-mono">({emp?.code})</span></span>
+                                return (
+                                  <tr key={pr.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30">
+                                    <td className="p-2.5 font-mono text-[10px] text-zinc-505 dark:text-zinc-400 whitespace-nowrap">
+                                      {paidDateFormatted}
+                                    </td>
+                                    <td className="p-2.5 font-bold text-zinc-900 dark:text-zinc-105">
+                                      <div className="flex items-center gap-2">
+                                        {emp?.profilePhoto ? (
+                                          <img src={emp.profilePhoto} alt={emp.name} className="h-6 w-6 object-cover border border-zinc-200 dark:border-zinc-800" />
+                                        ) : (
+                                          <div className={`h-6 w-6 bg-gradient-to-br ${getAvatarBg(emp?.name || "")} text-white flex items-center justify-center font-bold text-[9px]`}>
+                                            {getInitials(emp?.name || "")}
+                                          </div>
+                                        )}
+                                        <span>{emp?.name || pr.employeeId} <span className="text-[9px] text-zinc-400 font-mono">({emp?.code})</span></span>
+                                      </div>
+                                    </td>
+                                    <td className="p-2.5 font-mono text-[10px] text-zinc-600 dark:text-zinc-350">
+                                      {pr.payType}: ₹{pr.payRate}
+                                    </td>
+                                    <td className="p-2.5 font-mono text-[10px] text-zinc-550 dark:text-zinc-400">
+                                      {pr.grossHours}h / <strong className="text-zinc-700 dark:text-zinc-300">{pr.netHours}h</strong>
+                                    </td>
+                                    <td className="p-2.5 font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                      ₹{pr.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                    </td>
+                                    <td className="p-2.5 text-[10px] text-zinc-500 dark:text-zinc-400 max-w-xs truncate">
+                                      {pr.notes || "—"}
+                                    </td>
+                                    <td className="p-2.5 text-right">
+                                      <span className="inline-flex px-2 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[9px] font-bold uppercase">
+                                        Paid
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Mobile Card List View */}
+                        <div className="block md:hidden space-y-2.5">
+                          {filteredRecords.map(pr => {
+                            const emp = pr.employee || employees.find(e => e.id === pr.employeeId);
+                            const paidDateFormatted = pr.paidAt ? new Date(pr.paidAt).toLocaleDateString("en-US", {
+                              month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit"
+                            }) : pr.periodEnd;
+
+                            return (
+                              <div key={pr.id} className="p-3 bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-200 dark:border-zinc-800 rounded-lg space-y-2 text-xs">
+                                <div className="flex justify-between items-start">
+                                  <div className="flex items-center gap-2">
+                                    {emp?.profilePhoto ? (
+                                      <img src={emp.profilePhoto} alt={emp.name} className="h-8 w-8 rounded-full object-cover border border-zinc-200 dark:border-zinc-800" />
+                                    ) : (
+                                      <div className={`h-8 w-8 rounded-full bg-gradient-to-br ${getAvatarBg(emp?.name || "")} text-white flex items-center justify-center font-bold text-xs`}>
+                                        {getInitials(emp?.name || "")}
+                                      </div>
+                                    )}
+                                    <div>
+                                      <p className="font-bold text-zinc-900 dark:text-zinc-100 text-xs">
+                                        {emp?.name || pr.employeeId} <span className="text-[10px] text-zinc-400 font-mono">({emp?.code})</span>
+                                      </p>
+                                      <p className="text-[10px] font-mono text-zinc-400">{paidDateFormatted}</p>
                                     </div>
-                                  </td>
-                                  <td className="p-2.5 font-mono text-[10px] text-zinc-600 dark:text-zinc-350">
-                                    {pr.payType}: ₹{pr.payRate}
-                                  </td>
-                                  <td className="p-2.5 font-mono text-[10px] text-zinc-550 dark:text-zinc-400">
-                                    {pr.grossHours}h / <strong className="text-zinc-700 dark:text-zinc-300">{pr.netHours}h</strong>
-                                  </td>
-                                  <td className="p-2.5 font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                                    ₹{pr.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                                  </td>
-                                  <td className="p-2.5 text-[10px] text-zinc-500 dark:text-zinc-400 max-w-xs truncate">
-                                    {pr.notes || "—"}
-                                  </td>
-                                  <td className="p-2.5 text-right">
-                                    <span className="inline-flex px-2 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[9px] font-bold uppercase">
-                                      Paid
+                                  </div>
+                                  <span className="inline-flex px-2 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[9px] font-bold uppercase rounded shrink-0">
+                                    Paid
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-200/60 dark:border-zinc-800/60 text-[11px]">
+                                  <div>
+                                    <span className="text-[9px] text-zinc-400 uppercase font-semibold block">Pay Structure</span>
+                                    <span className="font-mono text-zinc-700 dark:text-zinc-300">{pr.payType}: ₹{pr.payRate}</span>
+                                  </div>
+                                  <div className="text-right">
+                                    <span className="text-[9px] text-zinc-400 uppercase font-semibold block">Paid Amount</span>
+                                    <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
+                                      ₹{pr.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                                     </span>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+                                  </div>
+                                </div>
+
+                                <div className="flex justify-between items-center text-[10px] text-zinc-500 pt-1">
+                                  <span>Hours: {pr.grossHours}h gross / <strong className="text-zinc-700 dark:text-zinc-300">{pr.netHours}h net</strong></span>
+                                  {pr.notes && <span className="italic truncate max-w-[150px]">"{pr.notes}"</span>}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     );
                   })()}
