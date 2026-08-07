@@ -7,6 +7,8 @@ import * as createPayrollRecords from "../migrations/04_create_payroll_records";
 import * as addShiftTimingsToEmployees from "../migrations/05_add_shift_timings_to_employees";
 import * as createEmploymentTypes from "../migrations/06_create_employment_types";
 import * as createDepartmentsAndPayStructures from "../migrations/07_create_departments_and_pay_structures";
+import * as addPieceCountToAttendance from "../migrations/08_add_piece_count_to_attendance";
+import * as addUnitPriceToAttendance from "../migrations/09_add_unit_price_to_attendance";
 
 interface Migration {
   name: string;
@@ -54,6 +56,16 @@ const MIGRATIONS: Migration[] = [
     name: "07_create_departments_and_pay_structures.ts",
     up: createDepartmentsAndPayStructures.up,
     down: createDepartmentsAndPayStructures.down
+  },
+  {
+    name: "08_add_piece_count_to_attendance.ts",
+    up: addPieceCountToAttendance.up,
+    down: addPieceCountToAttendance.down
+  },
+  {
+    name: "09_add_unit_price_to_attendance.ts",
+    up: addUnitPriceToAttendance.up,
+    down: addUnitPriceToAttendance.down
   }
 ];
 

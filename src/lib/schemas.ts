@@ -63,6 +63,8 @@ export const ManualAttendanceSchema = z.object({
   date: z.string().regex(dateRegex, "Date must be in YYYY-MM-DD format"),
   checkIn: z.string().regex(timeRegex, "Check-in time must be in HH:MM AM/PM format").or(z.literal("")).optional().nullable(),
   checkOut: z.string().regex(timeRegex, "Check-out time must be in HH:MM AM/PM format").or(z.literal("")).optional().nullable(),
+  pieceCount: z.number().int().nonnegative("Piece count must be non-negative").optional().nullable(),
+  unitPrice: z.number().nonnegative("Unit price must be non-negative").optional().nullable(),
 });
 
 export const TimesheetEntrySchema = z.object({
@@ -85,6 +87,14 @@ export const UpdateTimesheetSchema = z.object({
   date: z.string().regex(dateRegex, "Date must be in YYYY-MM-DD format"),
   entries: z.array(TimesheetEntrySchema).min(1, "At least one timesheet entry is required"),
   submittedAt: z.string().min(1, "Submission time is required").trim(),
+});
+
+export const AdminEditPunchSchema = z.object({
+  logId: z.string().min(1, "Log ID is required").trim(),
+  checkIn: z.string().regex(timeRegex, "Check-in must be in HH:MM AM/PM format").or(z.literal("")).optional().nullable(),
+  checkOut: z.string().regex(timeRegex, "Check-out must be in HH:MM AM/PM format").or(z.literal("")).optional().nullable(),
+  pieceCount: z.number().int().nonnegative("Piece count must be a non-negative integer").optional().nullable(),
+  unitPrice: z.number().nonnegative("Unit price must be non-negative").optional().nullable(),
 });
 
 /**

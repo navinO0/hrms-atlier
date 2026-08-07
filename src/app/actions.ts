@@ -30,6 +30,7 @@ import {
   EmploymentTypeSchema,
   DepartmentSchema,
   PayStructureSchema,
+  AdminEditPunchSchema,
   formatZodError
 } from "@/lib/schemas";
 
@@ -427,7 +428,7 @@ export async function clockInAction(employeeId: string, date: string, timeStr: s
   }
 }
 
-export async function clockOutAction(employeeId: string, date: string, timeStr: string) {
+export async function clockOutAction(employeeId: string, date: string, timeStr: string, pieceCount?: number | null, unitPrice?: number | null) {
   try {
     await initDb();
 
@@ -459,7 +460,14 @@ export async function clockOutAction(employeeId: string, date: string, timeStr: 
       return { success: false, error: "No active clock-in session found for today. Please clock in first." };
     }
 
-    await log.update({ checkOut: timeStr, status: "Clocked Out" });
+    const updateData: any = { checkOut: timeStr, status: "Clocked Out" };
+    if (pieceCount !== undefined && pieceCount !== null && !isNaN(Number(pieceCount))) {
+      updateData.pieceCount = Number(pieceCount);
+    }
+    if (unitPrice !== undefined && unitPrice !== null && !isNaN(Number(unitPrice))) {
+      updateData.unitPrice = Number(unitPrice);
+    }
+    await log.update(updateData);
 
     // Recalculate TOTAL effective hours from all today's completed pairs
     const allTodayLogs = await AttendanceLog.findAll({
@@ -503,12 +511,19 @@ export async function clockOutAction(employeeId: string, date: string, timeStr: 
   }
 }
 
-export async function saveManualAttendanceAction(employeeId: string, date: string, checkIn: string, checkOut: string) {
+export async function saveManualAttendanceAction(
+  employeeId: string, 
+  date: string, 
+  checkIn: string, 
+  checkOut: string,
+  pieceCount?: number | null,
+  unitPrice?: number | null
+) {
   try {
     await initDb();
 
     try {
-      const validated = ManualAttendanceSchema.parse({ employeeId, date, checkIn, checkOut });
+      const validated = ManualAttendanceSchema.parse({ employeeId, date, checkIn, checkOut, pieceCount, unitPrice });
       employeeId = validated.employeeId;
       date = validated.date;
       checkIn = validated.checkIn || "";
@@ -522,34 +537,55 @@ export async function saveManualAttendanceAction(employeeId: string, date: strin
       return { success: false, error: "Employee record not found in database." };
     }
 
-    const status = checkOut.trim() ? "Clocked Out" : "Clocked In";
-    const log = await AttendanceLog.findOne({ where: { employeeId, date } });
+    const pCount = (pieceCount !== undefined && pieceCount !== null && !isNaN(Number(pieceCount))) ? Number(pieceCount) : null;
+    const uPrice = (unitPrice !== undefined && unitPrice !== null && !isNaN(Number(unitPrice))) ? Number(unitPrice) : null;
+
+    // Find the first (earliest) punch log for the employee on this date
+    const log = await AttendanceLog.findOne({
+      where: { employeeId, date },
+      order: [["createdAt", "ASC"]],
+    });
 
     if (!log) {
+      // No existing log — create a new one with just checkIn; status = "Clocked In"
+      // Only set checkOut if admin explicitly provided one
       await AttendanceLog.create({
         id: `att-${Date.now()}`,
         employeeId,
         date,
         checkIn: checkIn || undefined,
         checkOut: checkOut || undefined,
-        status,
+        status: checkOut ? "Clocked Out" : "Clocked In",
+        pieceCount: pCount,
+        unitPrice: uPrice,
       });
     } else {
-      await log.update({
-        checkIn: checkIn || null,
-        checkOut: checkOut || null,
-        status,
-      });
+      // Existing log — only update checkIn and pieceCount/unitPrice.
+      // For checkOut: update only if admin provided a value; if empty string, set to null (not "").
+      // NEVER change the status — preserve whatever it currently is.
+      const updatePayload: Record<string, unknown> = {
+        checkIn: checkIn || log.checkIn || null,
+        pieceCount: pCount !== null ? pCount : log.pieceCount,
+        unitPrice: uPrice !== null ? uPrice : log.unitPrice,
+      };
+      if (checkOut) {
+        // Admin provided a checkout time — update it
+        updatePayload.checkOut = checkOut;
+      }
+      // If checkOut is empty, leave log.checkOut unchanged (do not overwrite)
+      await log.update(updatePayload);
     }
 
-    // Sync timesheet hours with manual attendance
-    const ts = await Timesheet.findOne({ where: { employeeId, date } });
-    if (ts) {
-      const finalHours = calculateHoursFromAttendance(checkIn, checkOut);
-      await TimesheetEntry.update(
-        { hours: finalHours },
-        { where: { timesheetId: ts.id } }
-      );
+    // Sync timesheet hours with manual attendance (only when both times are available)
+    if (checkIn && checkOut) {
+      const ts = await Timesheet.findOne({ where: { employeeId, date } });
+      if (ts) {
+        const finalHours = calculateHoursFromAttendance(checkIn, checkOut);
+        await TimesheetEntry.update(
+          { hours: finalHours },
+          { where: { timesheetId: ts.id } }
+        );
+      }
     }
 
     revalidatePath("/");
@@ -559,6 +595,8 @@ export async function saveManualAttendanceAction(employeeId: string, date: strin
     return { success: false, error: err?.message || (typeof err === "string" ? err : "Failed to update attendance due to a database/server error.") };
   }
 }
+
+
 
 interface ServerTimesheetEntry {
   id?: string;
@@ -1134,5 +1172,101 @@ export async function editPayStructureAction(id: string, name: string, daysPerPe
   } catch (err: any) {
     console.error("editPayStructureAction ERROR:", err);
     return { success: false, error: err?.message || "Failed to update pay structure." };
+  }
+}
+
+/**
+ * Admin-only: Edit a specific attendance log's punch times and/or piece count.
+ * After editing, re-syncs the related timesheet hours for that day.
+ */
+export async function adminEditPunchAction(
+  logId: string,
+  checkIn: string | null | undefined,
+  checkOut: string | null | undefined,
+  pieceCount?: number | null,
+  unitPrice?: number | null
+) {
+  try {
+    await initDb();
+    const session = await getSession();
+    if (!session || !session.isAuthenticated || session.authRole !== "Admin") {
+      return { success: false, error: "Unauthorized. Admin privileges required." };
+    }
+
+    try {
+      AdminEditPunchSchema.parse({ logId, checkIn, checkOut, pieceCount, unitPrice });
+    } catch (err: any) {
+      return { success: false, error: formatZodError(err) };
+    }
+
+    const log = await AttendanceLog.findByPk(logId);
+    if (!log) {
+      return { success: false, error: "Attendance log not found." };
+    }
+
+    const employeeId = log.get("employeeId") as string;
+    const date = log.get("date") as string;
+
+    const updateFields: any = {};
+    if (checkIn !== undefined) updateFields.checkIn = checkIn || null;
+    if (checkOut !== undefined) updateFields.checkOut = checkOut || null;
+    if (pieceCount !== undefined) {
+      updateFields.pieceCount = (pieceCount !== null && !isNaN(Number(pieceCount))) ? Number(pieceCount) : null;
+    }
+    if (unitPrice !== undefined) {
+      updateFields.unitPrice = (unitPrice !== null && !isNaN(Number(unitPrice))) ? Number(unitPrice) : null;
+    }
+
+    const newCheckOut = checkOut !== undefined ? checkOut : (log.get("checkOut") as string | undefined);
+    const newCheckIn  = checkIn  !== undefined ? checkIn  : (log.get("checkIn")  as string | undefined);
+    if (newCheckOut) updateFields.status = "Clocked Out";
+    else if (newCheckIn) updateFields.status = "Clocked In";
+
+    await log.update(updateFields);
+
+    const allDayLogs = await AttendanceLog.findAll({
+      where: { employeeId, date },
+      order: [["createdAt", "ASC"]],
+    });
+
+    const totalEffectiveHours = parseFloat(
+      allDayLogs.reduce((sum, l) => {
+        return sum + calculateHoursFromAttendance(
+          l.get("checkIn") as string | undefined,
+          l.get("checkOut") as string | undefined
+        );
+      }, 0).toFixed(2)
+    );
+
+    const ts = await Timesheet.findOne({
+      where: { employeeId, date },
+      include: [{ model: TimesheetEntry, as: "entries" }]
+    });
+    if (ts) {
+      await TimesheetEntry.update(
+        { hours: totalEffectiveHours },
+        { where: { timesheetId: ts.get("id") as string } }
+      );
+    }
+
+    revalidatePath("/");
+    return { success: true, updatedLog: log.toJSON(), allDayLogs: allDayLogs.map(l => l.toJSON()) };
+  } catch (err: any) {
+    console.error("adminEditPunchAction ERROR:", err);
+    return { success: false, error: err?.message || "Failed to update attendance log." };
+  }
+}
+
+/**
+ * Fetch all attendance logs for client-side refresh after admin edits.
+ */
+export async function getAttendanceLogsAction() {
+  try {
+    await initDb();
+    const logs = await AttendanceLog.findAll({ order: [["createdAt", "DESC"]] });
+    return { success: true, logs: logs.map(l => l.toJSON()) };
+  } catch (err: any) {
+    console.error("getAttendanceLogsAction ERROR:", err);
+    return { success: false, error: err?.message || "Failed to fetch attendance logs." };
   }
 }

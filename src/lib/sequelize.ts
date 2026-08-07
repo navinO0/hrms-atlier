@@ -100,6 +100,8 @@ export class AttendanceLog extends Model {
   declare checkIn?: string;
   declare checkOut?: string;
   declare status: "Clocked In" | "Clocked Out";
+  declare pieceCount?: number | null;
+  declare unitPrice?: number | null;
 }
 
 export class Timesheet extends Model {
@@ -212,6 +214,8 @@ export function initModels(sequelize: Sequelize): void {
       checkIn: { type: DataTypes.STRING, allowNull: true },
       checkOut: { type: DataTypes.STRING, allowNull: true },
       status: { type: DataTypes.STRING, allowNull: false },
+      pieceCount: { type: DataTypes.INTEGER, allowNull: true },
+      unitPrice: { type: DataTypes.FLOAT, allowNull: true },
     },
     { sequelize, modelName: "AttendanceLog" }
   );

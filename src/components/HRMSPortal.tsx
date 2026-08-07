@@ -54,7 +54,9 @@ import {
   deleteEmploymentTypeAction,
   editEmploymentTypeAction,
   editDepartmentAction,
-  editPayStructureAction
+  editPayStructureAction,
+  adminEditPunchAction,
+  getAttendanceLogsAction
 } from "@/app/actions";
 
 interface Employee {
@@ -83,6 +85,8 @@ interface AttendanceLog {
   checkOut?: string;
   status: "Clocked In" | "Clocked Out";
   employee?: Employee;
+  pieceCount?: number | null;
+  unitPrice?: number | null;
 }
 
 interface TimesheetEntry {
@@ -424,6 +428,31 @@ export default function HRMSPortal({
   // Payroll Filter States
   const [payrollFilterEmployeeId, setPayrollFilterEmployeeId] = useState("");
   const [payrollFilterDate, setPayrollFilterDate] = useState("");
+
+  // Per-Unit piece-count capture modal (shown at clock-out for Per Unit employees)
+  const [pieceCountModal, setPieceCountModal] = useState<{ empId: string } | null>(null);
+  const [pieceCountInput, setPieceCountInput] = useState<string>("0");
+  const [unitPriceInput, setUnitPriceInput] = useState<string>("");
+
+  // Admin punch inline editing — tracks which log is being edited in the modal
+  const [editingPunchLogId, setEditingPunchLogId] = useState<string | null>(null);
+  const [editPunchIn, setEditPunchIn] = useState<string>("");
+  const [editPunchOut, setEditPunchOut] = useState<string>("");
+  const [editPunchPieces, setEditPunchPieces] = useState<string>("");
+  const [editPunchUnitPrice, setEditPunchUnitPrice] = useState<string>("");
+  const [isSavingPunch, setIsSavingPunch] = useState<boolean>(false);
+
+  // Admin manual attendance entry state in Manage Staff modal
+  const [manualPieceCount, setManualPieceCount] = useState<string>("");
+  const [manualUnitPrice, setManualUnitPrice] = useState<string>("");
+
+  // Ledger tab: admin per-day pay / pieces editing
+  const [editingLogId, setEditingLogId] = useState<string | null>(null);
+  const [editLogPieces, setEditLogPieces] = useState<string>("");
+  const [editLogUnitPrice, setEditLogUnitPrice] = useState<string>("");
+  const [editLogCheckIn, setEditLogCheckIn] = useState<string>("");
+  const [editLogCheckOut, setEditLogCheckOut] = useState<string>("");
+  const [isSavingLog, setIsSavingLog] = useState<boolean>(false);
 
   // Last Login Persistence States
   const [lastLoginCode, setLastLoginCode] = useState<string | null>(null);
@@ -805,22 +834,30 @@ export default function HRMSPortal({
   const handleClockOut = async (empId?: string) => {
     if (isClocking) return;
     const targetEmpId = empId || activeEmpId;
+    await doClockOut(targetEmpId, null, null);
+  };
+
+  const doClockOut = async (targetEmpId: string, pieceCount: number | null, unitPrice: number | null) => {
     setIsClocking(true);
     setClockingEmpId(targetEmpId);
     try {
       const todayStr = getLocalTodayString();
       const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-      const res = await clockOutAction(targetEmpId, todayStr, timeStr) as any;
+      const res = await clockOutAction(
+        targetEmpId, 
+        todayStr, 
+        timeStr, 
+        pieceCount !== null ? pieceCount : undefined,
+        unitPrice !== null ? unitPrice : undefined
+      ) as any;
       if (res.success && res.attendanceLog) {
         if (res.todayLogs) {
-          // Server returned all today's punch records — sync the full list
           setAttendance(prev => {
             const otherDays = prev.filter(a => !(a.employeeId === targetEmpId && a.date === todayStr));
             return [...res.todayLogs!, ...otherDays];
           });
         } else {
-          // Fallback: update the specific record by id
           setAttendance(prev => prev.map(a => a.id === res.attendanceLog.id ? res.attendanceLog : a));
         }
         if (res.timesheet) {
@@ -829,9 +866,6 @@ export default function HRMSPortal({
         showToast("Clocked out successfully!", "success");
       } else {
         showToast(res.error || "Failed to clock out.", "error");
-      }
-      if (empId) {
-        setManualCheckOut(timeStr);
       }
     } catch (err) {
       console.error(err);
@@ -849,8 +883,10 @@ export default function HRMSPortal({
     setEditingAdminTimesheetId(null);
     const todayStr = getLocalTodayString();
     const log = attendance.find(a => a.employeeId === emp.id && a.date === todayStr);
-    setManualCheckIn(log?.checkIn || "");
-    setManualCheckOut(log?.checkOut || "");
+    setManualCheckIn(log?.checkIn ? timeTo24h(log.checkIn) : "");
+    setManualCheckOut(log?.checkOut ? timeTo24h(log.checkOut) : "");
+    setManualPieceCount(log?.pieceCount !== undefined && log?.pieceCount !== null ? String(log.pieceCount) : "");
+    setManualUnitPrice(log?.unitPrice !== undefined && log?.unitPrice !== null ? String(log.unitPrice) : (emp.payRate ? String(emp.payRate) : ""));
     setAdminTimesheetDate(todayStr);
     setAdminTimesheetEntries([{ description: "", hours: 4, images: [] }]);
   };
@@ -858,11 +894,96 @@ export default function HRMSPortal({
   // Admin save manual attendance corrections
   const handleSaveManualAttendance = async (empId: string) => {
     const todayStr = getLocalTodayString();
-    const res = await saveManualAttendanceAction(empId, todayStr, manualCheckIn, manualCheckOut);
+    const pCount = manualPieceCount !== "" ? Number(manualPieceCount) : null;
+    const uPrice = manualUnitPrice !== "" ? Number(manualUnitPrice) : null;
+    const formattedIn = manualCheckIn ? timeTo12h(manualCheckIn) : "";
+    const formattedOut = manualCheckOut ? timeTo12h(manualCheckOut) : "";
+    const res = await saveManualAttendanceAction(empId, todayStr, formattedIn, formattedOut, pCount, uPrice);
     if (res.success) {
       showToast("Attendance updated successfully!", "success");
+      // refresh attendance list
+      const updatedLogs = await getAttendanceLogsAction();
+      if (updatedLogs.success && updatedLogs.logs) {
+        setAttendance(updatedLogs.logs as any);
+      }
     } else {
       showToast(res.error || "Failed to update attendance.", "error");
+    }
+  };
+
+  // Admin: Save edited punch times / piece count / unit price for a specific attendance log
+  const handleAdminEditPunch = async (logId: string) => {
+    if (isSavingPunch) return;
+    setIsSavingPunch(true);
+    try {
+      const pc = editPunchPieces !== "" ? Number(editPunchPieces) : null;
+      const up = editPunchUnitPrice !== "" ? Number(editPunchUnitPrice) : null;
+      const formattedIn = editPunchIn ? timeTo12h(editPunchIn) : null;
+      const formattedOut = editPunchOut ? timeTo12h(editPunchOut) : null;
+      const res = await adminEditPunchAction(
+        logId,
+        formattedIn,
+        formattedOut,
+        pc,
+        up
+      ) as any;
+      if (res.success) {
+        if (res.allDayLogs) {
+          setAttendance(prev => {
+            const firstLog = res.allDayLogs[0];
+            if (!firstLog) return prev;
+            const { employeeId, date } = firstLog;
+            const others = prev.filter(a => !(a.employeeId === employeeId && a.date === date));
+            return [...res.allDayLogs, ...others];
+          });
+        }
+        setEditingPunchLogId(null);
+        showToast("Punch updated successfully!", "success");
+      } else {
+        showToast(res.error || "Failed to update punch.", "error");
+      }
+    } catch (err: any) {
+      showToast(err.message || "An error occurred.", "error");
+    } finally {
+      setIsSavingPunch(false);
+    }
+  };
+
+  // Admin: Save edited log pieces/times/rate from the Ledger tab
+  const handleAdminEditLog = async (logId: string) => {
+    if (isSavingLog) return;
+    setIsSavingLog(true);
+    try {
+      const pc = editLogPieces !== "" ? Number(editLogPieces) : null;
+      const up = editLogUnitPrice !== "" ? Number(editLogUnitPrice) : null;
+      const formattedIn = editLogCheckIn ? timeTo12h(editLogCheckIn) : undefined;
+      const formattedOut = editLogCheckOut ? timeTo12h(editLogCheckOut) : undefined;
+      const res = await adminEditPunchAction(
+        logId,
+        formattedIn,
+        formattedOut,
+        pc,
+        up
+      ) as any;
+      if (res.success) {
+        if (res.allDayLogs) {
+          setAttendance(prev => {
+            const firstLog = res.allDayLogs[0];
+            if (!firstLog) return prev;
+            const { employeeId, date } = firstLog;
+            const others = prev.filter(a => !(a.employeeId === employeeId && a.date === date));
+            return [...res.allDayLogs, ...others];
+          });
+        }
+        setEditingLogId(null);
+        showToast("Attendance record updated!", "success");
+      } else {
+        showToast(res.error || "Failed to update record.", "error");
+      }
+    } catch (err: any) {
+      showToast(err.message || "An error occurred.", "error");
+    } finally {
+      setIsSavingLog(false);
     }
   };
 
@@ -990,14 +1111,45 @@ export default function HRMSPortal({
   const latestTodayLog = todayAttendanceLogs[todayAttendanceLogs.length - 1] || null;
   const isCurrentlyClocked = latestTodayLog?.status === "Clocked In";
 
+  // Time conversion helpers for HTML <input type="time"> inputs
+  const timeTo24h = (timeStr?: string): string => {
+    if (!timeStr) return "";
+    const m = timeStr.match(/^(\d+):(\d+)\s*(AM|PM)?$/i);
+    if (!m) return timeStr;
+    let h = parseInt(m[1], 10);
+    const min = parseInt(m[2], 10);
+    if (m[3]) {
+      if (m[3].toUpperCase() === "PM" && h < 12) h += 12;
+      if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+    }
+    return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+  };
+
+  const timeTo12h = (timeStr?: string): string => {
+    if (!timeStr) return "";
+    const m = timeStr.match(/^(\d+):(\d+)\s*(AM|PM)?$/i);
+    if (!m) return timeStr;
+    let h = parseInt(m[1], 10);
+    const min = parseInt(m[2], 10);
+    let ampm = m[3] ? m[3].toUpperCase() : "";
+    if (!ampm) {
+      ampm = h >= 12 ? "PM" : "AM";
+      if (h > 12) h -= 12;
+      if (h === 0) h = 12;
+    }
+    return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')} ${ampm}`;
+  };
+
   // Pure client-side time parser → seconds since midnight
   const parseTimeSec = (t?: string): number | null => {
     if (!t) return null;
-    const m = t.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+    const m = t.match(/^(\d+):(\d+)\s*(AM|PM)?$/i);
     if (!m) return null;
-    let h = parseInt(m[1]), min = parseInt(m[2]);
-    if (m[3].toUpperCase() === "PM" && h < 12) h += 12;
-    if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+    let h = parseInt(m[1], 10), min = parseInt(m[2], 10);
+    if (m[3]) {
+      if (m[3].toUpperCase() === "PM" && h < 12) h += 12;
+      if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+    }
     return h * 3600 + min * 60;
   };
 
@@ -1138,7 +1290,29 @@ export default function HRMSPortal({
       }
     }
 
-    const pendingAmount = parseFloat((totalNetHours * effectiveHourlyRate).toFixed(2));
+    // Per Unit: pay is based on total pieces worked and individual per-piece unit rates from logs
+    let pendingAmount = 0;
+    let totalPieces = 0;
+    if (payType === "Per Unit") {
+      const unpaidLogsAll = empLogs.filter(a => {
+        if (!emp.lastPaidAt) return true;
+        const inTime = parseDateTime(a.date, a.checkIn);
+        if (!inTime) return false;
+        return inTime.getTime() >= new Date(emp.lastPaidAt!).getTime();
+      });
+
+      unpaidLogsAll.forEach(l => {
+        const pc = (l as any).pieceCount ? Number((l as any).pieceCount) : 0;
+        const up = ((l as any).unitPrice !== null && (l as any).unitPrice !== undefined && (l as any).unitPrice !== "")
+          ? Number((l as any).unitPrice)
+          : payRate;
+        totalPieces += pc;
+        pendingAmount += pc * up;
+      });
+      pendingAmount = parseFloat(pendingAmount.toFixed(2));
+    } else {
+      pendingAmount = parseFloat((totalNetHours * effectiveHourlyRate).toFixed(2));
+    }
     const periodStart = uniqueDates[0] || getLocalTodayString();
     const periodEnd = uniqueDates[uniqueDates.length - 1] || getLocalTodayString();
 
@@ -1154,7 +1328,8 @@ export default function HRMSPortal({
       effectiveHourlyRate: parseFloat(effectiveHourlyRate.toFixed(2)),
       pendingAmount,
       periodStart,
-      periodEnd
+      periodEnd,
+      totalPieces,
     };
   }, [attendance]);
 
@@ -1170,6 +1345,9 @@ export default function HRMSPortal({
 
     setIsProcessingPayment(true);
     try {
+      const pieceNote = emp.payType === "Per Unit" ? `📦 Total Pieces: ${calc.totalPieces} pcs` : "";
+      const combinedNotes = [pieceNote, payModalNotes].filter(Boolean).join(" • ");
+
       const res = await processPayrollPaymentAction(
         emp.id,
         calc.pendingAmount,
@@ -1178,7 +1356,7 @@ export default function HRMSPortal({
         calc.totalLunchDeductions,
         calc.periodStart,
         calc.periodEnd,
-        payModalNotes
+        combinedNotes
       );
 
       if (res.success && res.payrollRecord) {
@@ -1830,9 +2008,23 @@ export default function HRMSPortal({
                                             </div>
 
                                             <div className="flex items-center gap-3">
-                                              <span className="bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20 text-amber-700 dark:text-amber-400 px-2 py-0.5 font-bold text-xs font-mono rounded-none">
-                                                {workedText}
-                                              </span>
+                                              {emp?.payType === "Per Unit" ? (
+                                                (() => {
+                                                  const dayPieces = dayAttendance.reduce((sum, a) => sum + ((a as any).pieceCount || 0), 0);
+                                                  const dayPay = dayPieces * (emp.payRate || 0);
+                                                  return (
+                                                    <div className="flex items-center gap-2">
+                                                      <span className="bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 font-bold text-xs font-mono rounded-none">
+                                                        📦 {dayPieces} pcs (₹{dayPay.toLocaleString('en-IN')})
+                                                      </span>
+                                                    </div>
+                                                  );
+                                                })()
+                                              ) : (
+                                                <span className="bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20 text-amber-700 dark:text-amber-400 px-2 py-0.5 font-bold text-xs font-mono rounded-none">
+                                                  {workedText}
+                                                </span>
+                                              )}
                                               {isExpanded ? (
                                                 <ChevronUp className="h-4 w-4 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors" />
                                               ) : (
@@ -1844,6 +2036,121 @@ export default function HRMSPortal({
                                           {/* Expanded Body: Work Log details & images */}
                                           {isExpanded && (
                                             <div className="p-3 border-t border-zinc-150 dark:border-zinc-800/80 bg-zinc-50/30 dark:bg-zinc-950/20 space-y-2.5 animate-in slide-in-from-top-1 duration-150 rounded-none">
+                                              {/* Attendance logs & pieces summary card */}
+                                              {dayAttendance.length > 0 && (
+                                                <div className="bg-amber-500/5 border border-amber-500/20 p-2.5 rounded space-y-2 text-xs">
+                                                  <div className="flex justify-between items-center font-bold text-[10px] uppercase text-zinc-500">
+                                                    <span>Attendance & Piece Record for {dayStr}</span>
+                                                    <span className="text-amber-600 dark:text-amber-400 font-mono">
+                                                      Pay Rate: ₹{emp?.payRate || 0} {emp?.payType === "Per Unit" ? "/ piece" : "/ hr"}
+                                                    </span>
+                                                  </div>
+                                                  {dayAttendance.map((log, lIdx) => {
+                                                    const isEditingLog = editingLogId === log.id;
+                                                    return (
+                                                      <div key={log.id} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2 rounded flex flex-col gap-1 text-[11px] font-mono">
+                                                        <div className="flex justify-between items-center">
+                                                          <div>
+                                                            <span className="text-zinc-500 font-bold">Shift #{lIdx + 1}: {log.checkIn || "—"} → {log.checkOut || "Active"}</span>
+                                                            {(log as any).pieceCount !== undefined && (log as any).pieceCount !== null && (
+                                                              <span className="ml-2 text-amber-600 dark:text-amber-400 font-bold">
+                                                                ({(log as any).pieceCount} pcs @ ₹{(log as any).unitPrice || emp?.payRate || 0}/pc = ₹{(((log as any).pieceCount || 0) * ((log as any).unitPrice || emp?.payRate || 0)).toLocaleString('en-IN')})
+                                                              </span>
+                                                            )}
+                                                          </div>
+                                                          {!isEditingLog ? (
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => {
+                                                                setEditingLogId(log.id);
+                                                                setEditLogCheckIn(log.checkIn ? timeTo24h(log.checkIn) : "09:00");
+                                                                setEditLogCheckOut(log.checkOut ? timeTo24h(log.checkOut) : "18:00");
+                                                                setEditLogPieces((log as any).pieceCount !== undefined && (log as any).pieceCount !== null ? String((log as any).pieceCount) : "");
+                                                                setEditLogUnitPrice((log as any).unitPrice !== undefined && (log as any).unitPrice !== null ? String((log as any).unitPrice) : (emp?.payRate ? String(emp.payRate) : ""));
+                                                              }}
+                                                              className="px-2 py-0.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold text-[9px] rounded uppercase cursor-pointer"
+                                                            >
+                                                              Edit Pay / Pieces
+                                                            </button>
+                                                          ) : (
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => setEditingLogId(null)}
+                                                              className="text-zinc-400 hover:text-zinc-600 text-[9px] font-bold uppercase cursor-pointer"
+                                                            >
+                                                              Cancel
+                                                            </button>
+                                                          )}
+                                                        </div>
+
+                                                        {isEditingLog && (
+                                                          <div className="pt-2 font-sans space-y-2 border-t border-zinc-150 dark:border-zinc-800 mt-1">
+                                                            <div className="grid grid-cols-2 gap-2">
+                                                              <div>
+                                                                <label className="text-[9px] uppercase font-bold text-zinc-400 block">Check In</label>
+                                                                <input
+                                                                  type="time"
+                                                                  value={editLogCheckIn}
+                                                                  onChange={e => setEditLogCheckIn(e.target.value)}
+                                                                  className="w-full h-7 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded px-2 text-[10px] font-mono font-bold"
+                                                                />
+                                                              </div>
+                                                              <div>
+                                                                <label className="text-[9px] uppercase font-bold text-zinc-400 block">Check Out</label>
+                                                                <input
+                                                                  type="time"
+                                                                  value={editLogCheckOut}
+                                                                  onChange={e => setEditLogCheckOut(e.target.value)}
+                                                                  className="w-full h-7 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded px-2 text-[10px] font-mono font-bold"
+                                                                />
+                                                              </div>
+                                                            </div>
+                                                            <div className="grid grid-cols-2 gap-2">
+                                                              <div>
+                                                                <label className="text-[9px] uppercase font-bold text-amber-600 dark:text-amber-400 block">Pieces Worked</label>
+                                                                <input
+                                                                  type="number"
+                                                                  value={editLogPieces}
+                                                                  onChange={e => setEditLogPieces(e.target.value)}
+                                                                  className="w-full h-7 bg-zinc-50 dark:bg-zinc-955 border border-amber-300 rounded px-2 text-[10px] font-mono font-bold"
+                                                                  placeholder="0"
+                                                                />
+                                                              </div>
+                                                              <div>
+                                                                <label className="text-[9px] uppercase font-bold text-amber-600 dark:text-amber-400 block">Rate / Piece (₹)</label>
+                                                                <input
+                                                                  type="number"
+                                                                  value={editLogUnitPrice}
+                                                                  onChange={e => setEditLogUnitPrice(e.target.value)}
+                                                                  className="w-full h-7 bg-zinc-50 dark:bg-zinc-955 border border-amber-300 rounded px-2 text-[10px] font-mono font-bold"
+                                                                  placeholder="25"
+                                                                />
+                                                              </div>
+                                                            </div>
+
+                                                            {/* Live earned pay preview */}
+                                                            <div className="p-1.5 bg-amber-500/10 rounded flex justify-between items-center text-[10px] font-mono">
+                                                              <span className="text-zinc-500 font-bold">Earned Shift Pay:</span>
+                                                              <span className="font-extrabold text-amber-600 dark:text-amber-300">
+                                                                ₹{((parseFloat(editLogPieces) || 0) * (parseFloat(editLogUnitPrice) || emp?.payRate || 0)).toLocaleString('en-IN')}
+                                                              </span>
+                                                            </div>
+
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => handleAdminEditLog(log.id)}
+                                                              disabled={isSavingLog}
+                                                              className="w-full py-1 bg-amber-500 hover:bg-amber-600 text-black font-bold text-[9px] uppercase rounded cursor-pointer disabled:opacity-50"
+                                                            >
+                                                              {isSavingLog ? "Saving..." : "Save Changes"}
+                                                            </button>
+                                                          </div>
+                                                        )}
+                                                      </div>
+                                                    );
+                                                  })}
+                                                </div>
+                                              )}
                                               {allEntries.map((entry, idx) => (
                                                 <div key={entry.id || idx} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-3 space-y-2 shadow-2xs rounded-none">
                                                   <div className="flex justify-between items-start gap-3">
@@ -2104,15 +2411,16 @@ export default function HRMSPortal({
                       </div>
 
                       {/* Pay Structure & Pay Rate */}
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className={`grid ${empFormPayType === "Per Unit" ? "grid-cols-1" : "grid-cols-2"} gap-3`}>
                         <div className="space-y-1.5">
-                          <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Pay Structure</label>
+                          <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Pay Type</label>
                           <div className="relative">
                             <select
                               value={empFormPayType}
                               onChange={e => setEmpFormPayType(e.target.value)}
                               className="w-full h-10 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 pr-8 focus:outline-none focus:border-amber-500 transition-colors font-bold text-zinc-700 dark:text-zinc-355 cursor-pointer appearance-none"
                             >
+                              <option value="Per Unit">Per Unit (Piece Rate)</option>
                               {payStructures.map(ps => (
                                 <option key={ps.id} value={ps.name}>
                                   {ps.name} {ps.daysPerPeriod > 0 ? `(${ps.daysPerPeriod}d)` : "(Hourly)"}
@@ -2124,18 +2432,26 @@ export default function HRMSPortal({
                             </span>
                           </div>
                         </div>
-                        <div className="space-y-1.5">
-                          <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Rate (₹)</label>
-                          <input
-                            type="number"
-                            required
-                            placeholder="E.g., 15000"
-                            value={empFormPayRate}
-                            onChange={e => setEmpFormPayRate(e.target.value)}
-                            className="w-full h-10 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-805 rounded-xl px-3 focus:outline-none focus:border-amber-500 transition-colors font-semibold"
-                          />
-                        </div>
+                        {empFormPayType !== "Per Unit" && (
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] uppercase font-bold text-zinc-400 dark:text-zinc-500">Rate (₹)</label>
+                            <input
+                              type="number"
+                              required
+                              placeholder="E.g., 15000"
+                              value={empFormPayRate}
+                              onChange={e => setEmpFormPayRate(e.target.value)}
+                              className="w-full h-10 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-805 rounded-xl px-3 focus:outline-none focus:border-amber-500 transition-colors font-semibold"
+                            />
+                          </div>
+                        )}
                       </div>
+                      {empFormPayType === "Per Unit" && (
+                        <div className="flex items-start gap-2 p-2.5 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 rounded-xl text-[10px] text-amber-700 dark:text-amber-400 font-semibold">
+                          <span className="mt-0.5">💡</span>
+                          <span>Per Unit: Pieces worked and rate per piece (₹) are specified per shift during attendance entry or check-out.</span>
+                        </div>
+                      )}
                       <div className="flex gap-2">
                         <button
                           type="submit"
@@ -2334,32 +2650,53 @@ export default function HRMSPortal({
                             </div>
 
                             {/* Worked Breakdown */}
-                            <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-[10px] font-mono bg-white dark:bg-zinc-900 p-2.5 border border-zinc-200/80 dark:border-zinc-800">
-                              <div>
-                                <span className="text-zinc-400 block text-[9px] uppercase font-sans">Worked Days</span>
-                                <span className="font-bold text-zinc-800 dark:text-zinc-200">{calc.workedDaysCount} Days</span>
+                            {emp.payType === "Per Unit" ? (
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-mono bg-amber-500/5 p-2.5 border border-amber-500/20 rounded">
+                                <div>
+                                  <span className="text-zinc-400 block text-[9px] uppercase font-sans">Worked Days</span>
+                                  <span className="font-bold text-zinc-800 dark:text-zinc-200">{calc.workedDaysCount} Days</span>
+                                </div>
+                                <div>
+                                  <span className="text-zinc-400 block text-[9px] uppercase font-sans">Total Pieces</span>
+                                  <span className="font-bold text-amber-600 dark:text-amber-400 font-black">{calc.totalPieces} Pcs</span>
+                                </div>
+                                <div>
+                                  <span className="text-zinc-400 block text-[9px] uppercase font-sans">Piece Rate</span>
+                                  <span className="font-bold text-zinc-800 dark:text-zinc-200">₹{calc.payRate} / pc</span>
+                                </div>
+                                <div>
+                                  <span className="text-zinc-400 block text-[9px] uppercase font-sans">Pay Formula</span>
+                                  <span className="font-bold text-emerald-600 dark:text-emerald-400">{calc.totalPieces} × ₹{calc.payRate}</span>
+                                </div>
                               </div>
-                              <div>
-                                <span className="text-zinc-400 block text-[9px] uppercase font-sans">Gross Hours</span>
-                                <span className="font-bold text-zinc-800 dark:text-zinc-200">{formatHoursToHm(calc.totalGrossHours)}</span>
+                            ) : (
+                              <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-[10px] font-mono bg-white dark:bg-zinc-900 p-2.5 border border-zinc-200/80 dark:border-zinc-800">
+                                <div>
+                                  <span className="text-zinc-400 block text-[9px] uppercase font-sans">Worked Days</span>
+                                  <span className="font-bold text-zinc-800 dark:text-zinc-200">{calc.workedDaysCount} Days</span>
+                                </div>
+                                <div>
+                                  <span className="text-zinc-400 block text-[9px] uppercase font-sans">Gross Hours</span>
+                                  <span className="font-bold text-zinc-800 dark:text-zinc-200">{formatHoursToHm(calc.totalGrossHours)}</span>
+                                </div>
+                                <div>
+                                  <span className="text-zinc-400 block text-[9px] uppercase font-sans">Break Excl.</span>
+                                  <span className="font-bold text-red-500">-{formatHoursToHm(calc.totalLunchDeductions)}</span>
+                                </div>
+                                <div>
+                                  <span className="text-zinc-400 block text-[9px] uppercase font-sans">Regular Hours</span>
+                                  <span className="font-bold text-zinc-800 dark:text-zinc-200">{formatHoursToHm(calc.totalRegularHours)}</span>
+                                </div>
+                                <div>
+                                  <span className="text-zinc-400 block text-[9px] uppercase font-sans">Overtime</span>
+                                  <span className="font-bold text-amber-600 dark:text-amber-505">+{formatHoursToHm(calc.totalOvertimeHours)}</span>
+                                </div>
+                                <div>
+                                  <span className="text-zinc-400 block text-[9px] uppercase font-sans">Net Paid Hours</span>
+                                  <span className="font-bold text-emerald-600 dark:text-emerald-400">{formatHoursToHm(calc.totalNetHours)}</span>
+                                </div>
                               </div>
-                              <div>
-                                <span className="text-zinc-400 block text-[9px] uppercase font-sans">Break Excl.</span>
-                                <span className="font-bold text-red-500">-{formatHoursToHm(calc.totalLunchDeductions)}</span>
-                              </div>
-                              <div>
-                                <span className="text-zinc-400 block text-[9px] uppercase font-sans">Regular Hours</span>
-                                <span className="font-bold text-zinc-800 dark:text-zinc-200">{formatHoursToHm(calc.totalRegularHours)}</span>
-                              </div>
-                              <div>
-                                <span className="text-zinc-400 block text-[9px] uppercase font-sans">Overtime</span>
-                                <span className="font-bold text-amber-600 dark:text-amber-505">+{formatHoursToHm(calc.totalOvertimeHours)}</span>
-                              </div>
-                              <div>
-                                <span className="text-zinc-400 block text-[9px] uppercase font-sans">Net Paid Hours</span>
-                                <span className="font-bold text-emerald-600 dark:text-emerald-400">{formatHoursToHm(calc.totalNetHours)}</span>
-                              </div>
-                            </div>
+                            )}
 
                             <button
                               type="button"
@@ -2463,7 +2800,7 @@ export default function HRMSPortal({
                                 <th className="p-2.5">Date Paid</th>
                                 <th className="p-2.5">Staff Member</th>
                                 <th className="p-2.5">Pay Structure</th>
-                                <th className="p-2.5">Gross / Net Hours</th>
+                                <th className="p-2.5">Work Output / Hours</th>
                                 <th className="p-2.5">Paid Amount</th>
                                 <th className="p-2.5">Notes</th>
                                 <th className="p-2.5 text-right">Status</th>
@@ -2475,6 +2812,7 @@ export default function HRMSPortal({
                                 const paidDateFormatted = pr.paidAt ? new Date(pr.paidAt).toLocaleDateString("en-US", {
                                   month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit"
                                 }) : pr.periodEnd;
+                                const isPerUnit = pr.payType === "Per Unit" || (emp && emp.payType === "Per Unit");
 
                                 return (
                                   <tr key={pr.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30">
@@ -2494,10 +2832,22 @@ export default function HRMSPortal({
                                       </div>
                                     </td>
                                     <td className="p-2.5 font-mono text-[10px] text-zinc-600 dark:text-zinc-350">
-                                      {pr.payType}: ₹{pr.payRate}
+                                      {isPerUnit ? (
+                                        <span className="text-amber-600 dark:text-amber-400 font-bold">Per Unit (Piece Work)</span>
+                                      ) : (
+                                        <span>{pr.payType}: ₹{pr.payRate}</span>
+                                      )}
                                     </td>
                                     <td className="p-2.5 font-mono text-[10px] text-zinc-550 dark:text-zinc-400">
-                                      {pr.grossHours}h / <strong className="text-zinc-700 dark:text-zinc-300">{pr.netHours}h</strong>
+                                      {isPerUnit ? (
+                                        <span className="font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded text-[9.5px]">
+                                          {pr.notes && pr.notes.includes("Total Pieces:") 
+                                            ? pr.notes.match(/Total Pieces:\s*(\d+\s*pcs)/)?.[0] || "Piece Work"
+                                            : "Piece Work"}
+                                        </span>
+                                      ) : (
+                                        <span>{pr.grossHours}h / <strong className="text-zinc-700 dark:text-zinc-300">{pr.netHours}h</strong></span>
+                                      )}
                                     </td>
                                     <td className="p-2.5 font-mono font-bold text-emerald-600 dark:text-emerald-400">
                                       ₹{pr.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
@@ -2524,6 +2874,9 @@ export default function HRMSPortal({
                             const paidDateFormatted = pr.paidAt ? new Date(pr.paidAt).toLocaleDateString("en-US", {
                               month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit"
                             }) : pr.periodEnd;
+                            const isPerUnit = pr.payType === "Per Unit" || (emp && emp.payType === "Per Unit");
+                            const piecesMatch = pr.notes ? pr.notes.match(/Total Pieces: (\d+) pcs/) : null;
+                            const totalPiecesStr = piecesMatch ? piecesMatch[1] : null;
 
                             return (
                               <div key={pr.id} className="p-3 bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-200 dark:border-zinc-800 rounded-lg space-y-2 text-xs">
@@ -2551,19 +2904,29 @@ export default function HRMSPortal({
                                 <div className="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-200/60 dark:border-zinc-800/60 text-[11px]">
                                   <div>
                                     <span className="text-[9px] text-zinc-400 uppercase font-semibold block">Pay Structure</span>
-                                    <span className="font-mono text-zinc-700 dark:text-zinc-300">{pr.payType}: ₹{pr.payRate}</span>
+                                    {isPerUnit ? (
+                                      <span className="font-mono text-amber-600 dark:text-amber-400 font-bold">Per Unit (Piece Work)</span>
+                                    ) : (
+                                      <span className="font-mono text-zinc-700 dark:text-zinc-300">{pr.payType}: &#8377;{pr.payRate}</span>
+                                    )}
                                   </div>
                                   <div className="text-right">
                                     <span className="text-[9px] text-zinc-400 uppercase font-semibold block">Paid Amount</span>
                                     <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-sm">
-                                      ₹{pr.amount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                      &#8377;{pr.amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                                     </span>
                                   </div>
                                 </div>
 
                                 <div className="flex justify-between items-center text-[10px] text-zinc-500 pt-1">
-                                  <span>Hours: {pr.grossHours}h gross / <strong className="text-zinc-700 dark:text-zinc-300">{pr.netHours}h net</strong></span>
-                                  {pr.notes && <span className="italic truncate max-w-[150px]">"{pr.notes}"</span>}
+                                  {isPerUnit ? (
+                                    <span className="font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
+                                      &#128230; {totalPiecesStr ? `${totalPiecesStr} pcs total` : "Piece Work"}
+                                    </span>
+                                  ) : (
+                                    <span>Hours: {pr.grossHours}h gross / <strong className="text-zinc-700 dark:text-zinc-300">{pr.netHours}h net</strong></span>
+                                  )}
+                                  {pr.notes && !isPerUnit && <span className="italic truncate max-w-[120px]">&ldquo;{pr.notes}&rdquo;</span>}
                                 </div>
                               </div>
                             );
@@ -2612,40 +2975,61 @@ export default function HRMSPortal({
                         </div>
                       </div>
 
-                      <div className="space-y-1.5 font-mono text-[11px] bg-amber-500/5 border border-amber-500/20 p-3 text-amber-800 dark:text-amber-300">
-                        <div className="flex justify-between">
-                          <span className="font-sans text-zinc-500">Pay Structure:</span>
-                          <span className="font-bold">{calc.payType} (₹{calc.payRate.toLocaleString('en-IN')})</span>
+                      {emp.payType === "Per Unit" ? (
+                        <div className="space-y-1.5 font-mono text-[11px] bg-amber-500/5 border border-amber-500/20 p-3 text-amber-800 dark:text-amber-300">
+                          <div className="flex justify-between">
+                            <span className="font-sans text-zinc-500">Pay Structure:</span>
+                            <span className="font-bold text-amber-600 dark:text-amber-400">Per Unit (Piece Work)</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="font-sans text-zinc-500">Worked Period:</span>
+                            <span>{calc.periodStart} to {calc.periodEnd} ({calc.workedDaysCount} days)</span>
+                          </div>
+                          <div className="flex justify-between text-amber-600 dark:text-amber-400 font-bold">
+                            <span className="font-sans">Total Pieces Worked:</span>
+                            <span>📦 {calc.totalPieces} Pcs</span>
+                          </div>
+                          <div className="flex justify-between text-amber-600 dark:text-amber-400 font-black text-sm border-t border-amber-500/30 pt-1 mt-1">
+                            <span className="font-sans">Total Amount Payable:</span>
+                            <span>₹{calc.pendingAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                          </div>
                         </div>
-                        <div className="flex justify-between">
-                          <span className="font-sans text-zinc-500">Worked Period:</span>
-                          <span>{calc.periodStart} to {calc.periodEnd} ({calc.workedDaysCount} days)</span>
+                      ) : (
+                        <div className="space-y-1.5 font-mono text-[11px] bg-amber-500/5 border border-amber-500/20 p-3 text-amber-800 dark:text-amber-300">
+                          <div className="flex justify-between">
+                            <span className="font-sans text-zinc-500">Pay Structure:</span>
+                            <span className="font-bold">{calc.payType} (₹{calc.payRate.toLocaleString('en-IN')})</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="font-sans text-zinc-500">Worked Period:</span>
+                            <span>{calc.periodStart} to {calc.periodEnd} ({calc.workedDaysCount} days)</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="font-sans text-zinc-500">Gross Hours:</span>
+                            <span>{formatHoursToHm(calc.totalGrossHours)}</span>
+                          </div>
+                          <div className="flex justify-between text-red-500">
+                            <span className="font-sans text-zinc-500">Break Exclusion:</span>
+                            <span>-{formatHoursToHm(calc.totalLunchDeductions)} ({emp.breakTime || 60} mins/day)</span>
+                          </div>
+                          <div className="flex justify-between text-zinc-650 dark:text-zinc-400">
+                            <span className="font-sans">Regular Hours:</span>
+                            <span>{formatHoursToHm(calc.totalRegularHours)}</span>
+                          </div>
+                          <div className="flex justify-between text-amber-600 dark:text-amber-500 font-semibold">
+                            <span className="font-sans">Overtime Hours:</span>
+                            <span>+{formatHoursToHm(calc.totalOvertimeHours)}</span>
+                          </div>
+                          <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-bold border-t border-amber-500/20 pt-1 mt-1">
+                            <span className="font-sans">Net Paid Hours:</span>
+                            <span>{formatHoursToHm(calc.totalNetHours)}</span>
+                          </div>
+                          <div className="flex justify-between text-amber-600 dark:text-amber-400 font-black text-sm border-t border-amber-500/30 pt-1 mt-1">
+                            <span className="font-sans">Total Amount Payable:</span>
+                            <span>₹{calc.pendingAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                          </div>
                         </div>
-                        <div className="flex justify-between">
-                          <span className="font-sans text-zinc-500">Gross Hours:</span>
-                          <span>{formatHoursToHm(calc.totalGrossHours)}</span>
-                        </div>
-                        <div className="flex justify-between text-red-500">
-                          <span className="font-sans text-zinc-500">Break Exclusion:</span>
-                          <span>-{formatHoursToHm(calc.totalLunchDeductions)} ({emp.breakTime || 60} mins/day)</span>
-                        </div>
-                        <div className="flex justify-between text-zinc-650 dark:text-zinc-400">
-                          <span className="font-sans">Regular Hours:</span>
-                          <span>{formatHoursToHm(calc.totalRegularHours)}</span>
-                        </div>
-                        <div className="flex justify-between text-amber-600 dark:text-amber-500 font-semibold">
-                          <span className="font-sans">Overtime Hours:</span>
-                          <span>+{formatHoursToHm(calc.totalOvertimeHours)}</span>
-                        </div>
-                        <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-bold border-t border-amber-500/20 pt-1 mt-1">
-                          <span className="font-sans">Net Paid Hours:</span>
-                          <span>{formatHoursToHm(calc.totalNetHours)}</span>
-                        </div>
-                        <div className="flex justify-between text-amber-600 dark:text-amber-400 font-black text-sm border-t border-amber-500/30 pt-1 mt-1">
-                          <span className="font-sans">Total Amount Payable:</span>
-                          <span>₹{calc.pendingAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                        </div>
-                      </div>
+                      )}
 
                       <div className="space-y-1">
                         <label className="text-[10px] uppercase font-bold text-zinc-400">Transaction Notes (Optional)</label>
@@ -3585,6 +3969,68 @@ export default function HRMSPortal({
         </div>
       )}
 
+      {/* Piece Count Capture Modal removed — pieces are entered by admin via attendance edit */}
+      {false && pieceCountModal && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200"
+          onClick={() => setPieceCountModal(null)}
+        >
+          <div 
+            className="bg-white dark:bg-zinc-900 border border-amber-500/30 p-5 rounded-2xl w-full max-w-sm flex flex-col relative text-left shadow-2xl animate-in zoom-in-95 duration-200 space-y-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center pb-2.5 border-b border-zinc-150 dark:border-zinc-800">
+              <span className="font-extrabold text-xs text-amber-600 dark:text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                📦 Piece Count Entry
+              </span>
+              <button
+                type="button"
+                onClick={() => setPieceCountModal(null)}
+                className="text-xs font-bold text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <p className="text-zinc-600 dark:text-zinc-300 font-medium leading-snug">
+                This employee's pay type is <strong className="text-amber-600 dark:text-amber-400">Per Unit</strong>. Please specify how many pieces/units were completed in this shift.
+              </p>
+
+              <div className="space-y-1">
+                <label className="text-[9px] uppercase font-bold text-zinc-400 block">Number of Pieces</label>
+                <input
+                  type="number"
+                  min="0"
+                  autoFocus
+                  value={pieceCountInput}
+                  onChange={e => setPieceCountInput(e.target.value)}
+                  className="w-full h-12 bg-zinc-50 dark:bg-zinc-950 border-2 border-amber-500/50 rounded-xl px-3 font-mono font-black text-xl text-zinc-900 dark:text-zinc-50 focus:outline-none focus:border-amber-500 transition-colors text-center"
+                  placeholder="0"
+                />
+              </div>
+
+              <p className="text-[10px] text-zinc-400 italic">Rate per piece will be set by admin in the attendance record.</p>
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const pc = Math.max(0, parseInt(pieceCountInput, 10) || 0);
+                    const targetEmpId = pieceCountModal.empId;
+                    setPieceCountModal(null);
+                    doClockOut(targetEmpId, pc, 0);
+                  }}
+                  className="flex-1 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-black text-xs uppercase tracking-wider rounded-xl cursor-pointer transition-all shadow-md flex items-center justify-center gap-1.5"
+                >
+                  Confirm & Clock Out
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Employee Admin Management Modal */}
       {selectedAdminEmp && (
         <div 
@@ -3652,14 +4098,120 @@ export default function HRMSPortal({
                       </div>
 
                       {todayPunches.length > 0 && (
-                        <div className="pt-2 border-t border-zinc-200 dark:border-zinc-800/80 text-[10px] text-zinc-455 dark:text-zinc-500 space-y-1">
-                          <p className="font-bold uppercase text-[8px] tracking-wider text-zinc-400 mb-1 leading-none">Today's Punch History:</p>
-                          {todayPunches.map((log, pIdx) => (
-                            <div key={log.id} className="flex justify-between items-center font-mono text-[9px]">
-                              <span>Punch {pIdx + 1}:</span>
-                              <span>{log.checkIn || "—"} → {log.checkOut || (log.status === "Clocked In" ? "now…" : "—")}</span>
-                            </div>
-                          ))}
+                        <div className="pt-2 border-t border-zinc-200 dark:border-zinc-800/80 text-[10px] space-y-2">
+                          <p className="font-bold uppercase text-[8px] tracking-wider text-zinc-400 leading-none flex justify-between items-center">
+                            <span>Today's Punch History & Time Edits:</span>
+                            <span className="text-[7.5px] text-amber-500 lowercase font-normal">click edit to adjust times</span>
+                          </p>
+                          {todayPunches.map((log, pIdx) => {
+                            const isEditing = editingPunchLogId === log.id;
+                            return (
+                              <div key={log.id} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-2 rounded-lg space-y-1.5 font-mono text-[10px]">
+                                <div className="flex justify-between items-center">
+                                  <span className="font-bold text-zinc-600 dark:text-zinc-400">Punch #{pIdx + 1}</span>
+                                  {!isEditing ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingPunchLogId(log.id);
+                                        setEditPunchIn(log.checkIn ? timeTo24h(log.checkIn) : "09:00");
+                                        setEditPunchOut(log.checkOut ? timeTo24h(log.checkOut) : "18:00");
+                                        setEditPunchPieces(log.pieceCount !== undefined && log.pieceCount !== null ? String(log.pieceCount) : "");
+                                        setEditPunchUnitPrice(log.unitPrice !== undefined && log.unitPrice !== null ? String(log.unitPrice) : (selectedAdminEmp.payRate ? String(selectedAdminEmp.payRate) : ""));
+                                      }}
+                                      className="px-1.5 py-0.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 font-bold rounded text-[8px] uppercase tracking-wider transition-colors cursor-pointer"
+                                    >
+                                      Edit Time
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingPunchLogId(null)}
+                                      className="px-1.5 py-0.5 text-zinc-400 hover:text-zinc-600 font-bold text-[8px] uppercase cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                  )}
+                                </div>
+
+                                {!isEditing ? (
+                                  <div className="flex flex-wrap justify-between items-center text-zinc-700 dark:text-zinc-300 gap-1.5">
+                                    <span>In: <strong className="text-zinc-900 dark:text-zinc-100">{log.checkIn || "—"}</strong></span>
+                                    <span>Out: <strong className="text-zinc-900 dark:text-zinc-100">{log.checkOut || (log.status === "Clocked In" ? "Active" : "—")}</strong></span>
+                                    {log.pieceCount !== undefined && log.pieceCount !== null && (
+                                      <span className="text-amber-600 dark:text-amber-400 font-bold">
+                                        {log.pieceCount} pcs
+                                        {log.unitPrice ? ` @ ₹${log.unitPrice}/pc = ₹${(log.pieceCount * log.unitPrice).toLocaleString('en-IN')}` : ''}
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="space-y-2 pt-1 font-sans">
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                      <div>
+                                        <label className="text-[8px] uppercase font-bold text-zinc-400 block">Check In Time</label>
+                                        <input
+                                          type="time"
+                                          value={editPunchIn}
+                                          onChange={e => setEditPunchIn(e.target.value)}
+                                          className="w-full h-7 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded px-1.5 text-[10px] font-mono font-bold text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-amber-500"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[8px] uppercase font-bold text-zinc-400 block">Check Out Time</label>
+                                        <input
+                                          type="text"
+                                          placeholder="06:00 PM"
+                                          value={editPunchOut}
+                                          onChange={e => setEditPunchOut(e.target.value)}
+                                          className="w-full h-7 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded px-1.5 text-[10px] font-mono font-bold text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-amber-500"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                      <div>
+                                        <label className="text-[8px] uppercase font-bold text-amber-600 dark:text-amber-400 block">Pieces Worked</label>
+                                        <input
+                                          type="number"
+                                          placeholder="0"
+                                          value={editPunchPieces}
+                                          onChange={e => setEditPunchPieces(e.target.value)}
+                                          className="w-full h-7 bg-zinc-50 dark:bg-zinc-955 border border-amber-300 dark:border-amber-700/50 rounded px-1.5 text-[10px] font-mono font-bold text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-amber-500"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="text-[8px] uppercase font-bold text-amber-600 dark:text-amber-400 block">Rate / Piece (₹)</label>
+                                        <input
+                                          type="number"
+                                          placeholder="25"
+                                          value={editPunchUnitPrice}
+                                          onChange={e => setEditPunchUnitPrice(e.target.value)}
+                                          className="w-full h-7 bg-zinc-50 dark:bg-zinc-955 border border-amber-300 dark:border-amber-700/50 rounded px-1.5 text-[10px] font-mono font-bold text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-amber-500"
+                                        />
+                                      </div>
+                                    </div>
+
+                                    {/* Preview Calculated Earnings */}
+                                    <div className="p-1.5 bg-amber-500/10 rounded flex justify-between items-center text-[10px] font-mono">
+                                      <span className="text-zinc-500 font-bold">Earned Amount:</span>
+                                      <span className="font-extrabold text-amber-600 dark:text-amber-300">
+                                        ₹{((parseFloat(editPunchPieces) || 0) * (parseFloat(editPunchUnitPrice) || selectedAdminEmp.payRate || 0)).toLocaleString('en-IN')}
+                                      </span>
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleAdminEditPunch(log.id)}
+                                      disabled={isSavingPunch}
+                                      className="w-full py-1 bg-amber-500 hover:bg-amber-600 text-black font-bold text-[9px] uppercase tracking-wider rounded transition-colors flex items-center justify-center gap-1 disabled:opacity-50 cursor-pointer"
+                                    >
+                                      {isSavingPunch ? "Saving..." : "Save Time & Piece Edit"}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -3685,6 +4237,89 @@ export default function HRMSPortal({
                           Check Out Staff
                         </button>
                       )}
+                    </div>
+
+                    {/* Manual Attendance & Piece Pay Entry Section */}
+                    <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800/80 space-y-2.5">
+                      <p className="font-bold uppercase text-[9px] tracking-wider text-zinc-500 flex items-center gap-1 leading-none">
+                        <Pencil className="h-3 w-3 text-amber-500" /> Manual Attendance & Piece Pay Entry
+                      </p>
+
+                      <p className="text-[9px] text-zinc-400 italic leading-snug">
+                        Updates the first punch check-in time. Check-out status is preserved unless you set a check-out time. Leave check-out empty to keep employee as "Clocked In".
+                      </p>
+
+                      <div className="grid grid-cols-2 gap-2 text-[10px]">
+                        <div>
+                          <label className="text-[8.5px] uppercase font-bold text-zinc-400 block">Check In Time <span className="text-amber-500">*</span></label>
+                          <input
+                            type="time"
+                            value={timeTo24h(manualCheckIn)}
+                            onChange={e => setManualCheckIn(e.target.value)}
+                            className="w-full h-8 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 font-mono font-semibold"
+                          />
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <label className="text-[8.5px] uppercase font-bold text-zinc-400 block">Check Out Time <span className="text-zinc-300 dark:text-zinc-600">(optional)</span></label>
+                            {manualCheckOut && (
+                              <button
+                                type="button"
+                                onClick={() => setManualCheckOut("")}
+                                className="text-[8px] text-zinc-400 hover:text-red-500 cursor-pointer font-bold"
+                              >
+                                Clear ✕
+                              </button>
+                            )}
+                          </div>
+                          <input
+                            type="time"
+                            value={timeTo24h(manualCheckOut)}
+                            onChange={e => setManualCheckOut(e.target.value)}
+                            className="w-full h-8 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 font-mono font-semibold"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-[10px]">
+                        <div>
+                          <label className="text-[8.5px] uppercase font-bold text-amber-600 dark:text-amber-400 block">Pieces Worked</label>
+                          <input
+                            type="number"
+                            placeholder="0"
+                            value={manualPieceCount}
+                            onChange={e => setManualPieceCount(e.target.value)}
+                            className="w-full h-8 bg-zinc-50 dark:bg-zinc-950 border border-amber-300 dark:border-amber-700/50 rounded-lg px-2 font-mono font-semibold text-zinc-900 dark:text-zinc-100"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[8.5px] uppercase font-bold text-amber-600 dark:text-amber-400 block">Rate per Piece (₹)</label>
+                          <input
+                            type="number"
+                            placeholder="25"
+                            value={manualUnitPrice}
+                            onChange={e => setManualUnitPrice(e.target.value)}
+                            className="w-full h-8 bg-zinc-50 dark:bg-zinc-950 border border-amber-300 dark:border-amber-700/50 rounded-lg px-2 font-mono font-semibold text-zinc-900 dark:text-zinc-100"
+                          />
+                        </div>
+                      </div>
+
+                      {(manualPieceCount || manualUnitPrice) && (
+                        <div className="p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg flex justify-between items-center text-[10px] font-mono">
+                          <span className="text-zinc-500 font-bold">Calculated Shift Pay:</span>
+                          <span className="font-extrabold text-amber-600 dark:text-amber-300">
+                            ₹{((parseFloat(manualPieceCount) || 0) * (parseFloat(manualUnitPrice) || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => handleSaveManualAttendance(selectedAdminEmp.id)}
+                        className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-zinc-200 dark:text-zinc-900 font-bold text-[10px] uppercase tracking-wider rounded-lg transition-colors cursor-pointer shadow-xs"
+                      >
+                        Save Manual Attendance Record
+                      </button>
                     </div>
                   </div>
                 );
