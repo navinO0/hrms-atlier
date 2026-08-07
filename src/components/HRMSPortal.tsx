@@ -4017,7 +4017,8 @@ export default function HRMSPortal({
                   type="button"
                   onClick={() => {
                     const pc = Math.max(0, parseInt(pieceCountInput, 10) || 0);
-                    const targetEmpId = pieceCountModal.empId;
+                    const targetEmpId = pieceCountModal?.empId;
+                    if (!targetEmpId) return;
                     setPieceCountModal(null);
                     doClockOut(targetEmpId, pc, 0);
                   }}
