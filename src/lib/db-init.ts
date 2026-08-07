@@ -116,7 +116,9 @@ async function autoCheckoutForgottenLogs() {
       for (const log of forgottenLogs) {
         await log.update({
           checkOut: "06:00 PM",
-          status: "Clocked Out"
+          status: "Auto Clocked Out",
+          isAutoCheckout: true,
+          regularizationStatus: "None"
         });
 
         const employeeId = log.get('employeeId') as string;

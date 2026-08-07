@@ -43,10 +43,10 @@ export async function getSequelize(): Promise<Sequelize> {
       idle: 10000,
     },
     dialectOptions: {
-      ssl: {
-        require: true,
-        rejectUnauthorized: false,
-      },
+      // ssl: {
+      //   require: true,
+      //   rejectUnauthorized: false,
+      // },
       keepAlive: true,
     },
   });
@@ -99,9 +99,14 @@ export class AttendanceLog extends Model {
   declare date: string;
   declare checkIn?: string;
   declare checkOut?: string;
-  declare status: "Clocked In" | "Clocked Out";
+  declare status: "Clocked In" | "Clocked Out" | "Auto Clocked Out";
   declare pieceCount?: number | null;
   declare unitPrice?: number | null;
+  declare isAutoCheckout?: boolean;
+  declare overrideOtHours?: number | null;
+  declare regularizationStatus?: "None" | "Pending" | "Approved" | "Rejected";
+  declare regularizedCheckOut?: string | null;
+  declare regularizationReason?: string | null;
 }
 
 export class Timesheet extends Model {
@@ -216,6 +221,11 @@ export function initModels(sequelize: Sequelize): void {
       status: { type: DataTypes.STRING, allowNull: false },
       pieceCount: { type: DataTypes.INTEGER, allowNull: true },
       unitPrice: { type: DataTypes.FLOAT, allowNull: true },
+      isAutoCheckout: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      overrideOtHours: { type: DataTypes.FLOAT, allowNull: true, defaultValue: null },
+      regularizationStatus: { type: DataTypes.STRING, allowNull: false, defaultValue: "None" },
+      regularizedCheckOut: { type: DataTypes.STRING, allowNull: true, defaultValue: null },
+      regularizationReason: { type: DataTypes.TEXT, allowNull: true, defaultValue: null },
     },
     { sequelize, modelName: "AttendanceLog" }
   );
@@ -314,33 +324,49 @@ export function initModels(sequelize: Sequelize): void {
 
 // ─── Helper Utilities ─────────────────────────────────────────────────────────
 
-export function calculateHoursFromAttendance(checkInStr?: string, checkOutStr?: string): number {
+export function calculateHoursFromAttendance(checkInStr?: string, checkOutStr?: string, maxCapHours?: number): number {
   if (!checkInStr) return 0;
 
   const parseTime = (timeStr: string): Date | null => {
-    const match = timeStr.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
-    if (!match) return null;
-    let [_, hours, minutes, ampm] = match;
-    let h = parseInt(hours, 10);
-    const m = parseInt(minutes, 10);
-    if (ampm.toUpperCase() === "PM" && h < 12) h += 12;
-    if (ampm.toUpperCase() === "AM" && h === 12) h = 0;
-    const d = new Date();
-    d.setHours(h, m, 0, 0);
-    return d;
+    if (!timeStr) return null;
+    const match12 = timeStr.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+    if (match12) {
+      let [_, hours, minutes, ampm] = match12;
+      let h = parseInt(hours, 10);
+      const m = parseInt(minutes, 10);
+      if (ampm.toUpperCase() === "PM" && h < 12) h += 12;
+      if (ampm.toUpperCase() === "AM" && h === 12) h = 0;
+      const d = new Date();
+      d.setHours(h, m, 0, 0);
+      return d;
+    }
+    const match24 = timeStr.match(/^(\d+):(\d+)$/);
+    if (match24) {
+      let h = parseInt(match24[1], 10);
+      let m = parseInt(match24[2], 10);
+      const d = new Date();
+      d.setHours(h, m, 0, 0);
+      return d;
+    }
+    return null;
   };
 
   const inTime = parseTime(checkInStr);
   if (!inTime) return 0;
 
-  let outTime = checkOutStr ? parseTime(checkOutStr) : null;
-  if (!outTime) {
-    outTime = new Date();
-  }
+  const isMissingCheckout = !checkOutStr;
+  let outTime = checkOutStr ? parseTime(checkOutStr) : new Date();
 
-  const diffMs = outTime.getTime() - inTime.getTime();
+  const diffMs = outTime ? outTime.getTime() - inTime.getTime() : 0;
   if (diffMs <= 0) return 0;
 
-  const diffHours = diffMs / (1000 * 60 * 60);
+  let diffHours = diffMs / (1000 * 60 * 60);
+
+  // Safety cap for open punches / missing checkouts to prevent runaway dynamic hours
+  if (isMissingCheckout) {
+    const cap = maxCapHours !== undefined ? maxCapHours : 8.0;
+    diffHours = Math.min(diffHours, cap);
+  }
+
   return parseFloat(diffHours.toFixed(2));
 }

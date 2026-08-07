@@ -95,6 +95,7 @@ export const AdminEditPunchSchema = z.object({
   checkOut: z.string().regex(timeRegex, "Check-out must be in HH:MM AM/PM format").or(z.literal("")).optional().nullable(),
   pieceCount: z.number().int().nonnegative("Piece count must be a non-negative integer").optional().nullable(),
   unitPrice: z.number().nonnegative("Unit price must be non-negative").optional().nullable(),
+  overrideOtHours: z.number().nonnegative("Override OT hours must be non-negative").optional().nullable(),
 });
 
 /**

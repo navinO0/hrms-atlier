@@ -26,7 +26,10 @@ import {
   X,
   Trash2,
   Banknote,
-  Settings
+  Settings,
+  Calendar,
+  AlertTriangle,
+  Edit3
 } from "lucide-react";
 
 // ── Toast System ──────────────────────────────────────────────
@@ -453,6 +456,53 @@ export default function HRMSPortal({
   const [editLogCheckIn, setEditLogCheckIn] = useState<string>("");
   const [editLogCheckOut, setEditLogCheckOut] = useState<string>("");
   const [isSavingLog, setIsSavingLog] = useState<boolean>(false);
+
+  // Detailed Staff Payroll Breakdown & Per-Date Editing Modal State
+  const [detailedStaffEmp, setDetailedStaffEmp] = useState<Employee | null>(null);
+  const [editingDateLogId, setEditingDateLogId] = useState<string | null>(null);
+  const [editDateCheckIn, setEditDateCheckIn] = useState<string>("");
+  const [editDateCheckOut, setEditDateCheckOut] = useState<string>("");
+  const [editDateOtHours, setEditDateOtHours] = useState<string>("");
+  const [editDateOtOverrideEnabled, setEditDateOtOverrideEnabled] = useState<boolean>(false);
+  const [editDatePieceCount, setEditDatePieceCount] = useState<string>("");
+  const [editDateUnitPrice, setEditDateUnitPrice] = useState<string>("");
+  const [isSavingDateEdit, setIsSavingDateEdit] = useState<boolean>(false);
+
+  const handleSaveDateEdit = async (item: any) => {
+    if (!item || !item.logId || isSavingDateEdit) return;
+    setIsSavingDateEdit(true);
+    try {
+      // Only pass overrideOtHours if admin explicitly enabled manual override.
+      // Otherwise pass null so the DB clears any previous override and OT
+      // recalculates naturally from the new check-in / check-out times.
+      const otOverride = editDateOtOverrideEnabled && editDateOtHours !== ""
+        ? Number(editDateOtHours)
+        : null;
+      const res = await adminEditPunchAction(
+        item.logId,
+        editDateCheckIn || item.checkIn,
+        editDateCheckOut || item.checkOut,
+        editDatePieceCount !== "" ? Number(editDatePieceCount) : null,
+        editDateUnitPrice !== "" ? Number(editDateUnitPrice) : null,
+        otOverride
+      );
+      if (res.success) {
+        const refreshed = await getAttendanceLogsAction();
+        if (refreshed.success && refreshed.logs) {
+          setAttendance(refreshed.logs);
+        }
+        setEditingDateLogId(null);
+        setEditDateOtOverrideEnabled(false);
+        toast.success(`Date details for ${item.date} updated successfully.`);
+      } else {
+        toast.error(res.error || "Failed to update date details.");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "An unexpected error occurred while saving date details.");
+    } finally {
+      setIsSavingDateEdit(false);
+    }
+  };
 
   // Last Login Persistence States
   const [lastLoginCode, setLastLoginCode] = useState<string | null>(null);
@@ -1169,13 +1219,21 @@ export default function HRMSPortal({
     // A helper to parse checkIn/checkOut time with log date into a local Date object
     const parseDateTime = (dateStr: string, timeStr?: string): Date | null => {
       if (!timeStr) return null;
-      const match = timeStr.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
-      if (!match) return null;
-      let [_, hours, minutes, ampm] = match;
-      let h = parseInt(hours, 10);
-      const m = parseInt(minutes, 10);
-      if (ampm.toUpperCase() === "PM" && h < 12) h += 12;
-      if (ampm.toUpperCase() === "AM" && h === 12) h = 0;
+      let h = 0;
+      let m = 0;
+      const match12 = timeStr.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+      if (match12) {
+        let [_, hours, minutes, ampm] = match12;
+        h = parseInt(hours, 10);
+        m = parseInt(minutes, 10);
+        if (ampm.toUpperCase() === "PM" && h < 12) h += 12;
+        if (ampm.toUpperCase() === "AM" && h === 12) h = 0;
+      } else {
+        const match24 = timeStr.match(/^(\d+):(\d+)$/);
+        if (!match24) return null;
+        h = parseInt(match24[1], 10);
+        m = parseInt(match24[2], 10);
+      }
 
       const parts = dateStr.split('-');
       if (parts.length !== 3) return null;
@@ -1241,12 +1299,26 @@ export default function HRMSPortal({
     let totalLunchDeductions = 0;
     let totalRegularHours = 0;
     let totalOvertimeHours = 0;
+    const dailyBreakdown: any[] = [];
 
     uniqueDates.forEach(d => {
       const dayLogs = logsByDate[d];
       let dayGross = 0;
+      let dayHasAutoCheckout = false;
+      let dayHasOverrideOt = false;
+      let customOtHours = 0;
+
       dayLogs.forEach(l => {
         dayGross += getUnpaidHoursForLog(l);
+        if (l.isAutoCheckout || l.status === "Auto Clocked Out") {
+          if (l.regularizationStatus !== "Approved") {
+            dayHasAutoCheckout = true;
+          }
+        }
+        if (l.overrideOtHours !== undefined && l.overrideOtHours !== null) {
+          dayHasOverrideOt = true;
+          customOtHours += Number(l.overrideOtHours);
+        }
       });
 
       if (dayGross > 0) {
@@ -1256,18 +1328,45 @@ export default function HRMSPortal({
         const lunchDeduction = dayGross >= breakTriggerLimit ? Math.min(dayGross, breakHours) : 0;
         
         const dayNet = Math.max(0, dayGross - lunchDeduction);
-        
         const regularHours = Math.min(dayNet, standardLimit);
-        const overtimeHours = Math.max(0, dayNet - standardLimit);
+
+        let overtimeHours = 0;
+        if (dayHasOverrideOt) {
+          overtimeHours = Math.max(0, customOtHours);
+        } else if (dayHasAutoCheckout) {
+          // Forgot checkout / Auto checkout: OT is capped at 0 until regularized or edited by admin!
+          overtimeHours = 0;
+        } else {
+          overtimeHours = Math.max(0, dayNet - standardLimit);
+        }
 
         totalGrossHours += dayGross;
         totalLunchDeductions += lunchDeduction;
         totalRegularHours += regularHours;
         totalOvertimeHours += overtimeHours;
+
+        const mainLog = dayLogs[0] || {};
+        dailyBreakdown.push({
+          date: d,
+          logId: mainLog.id,
+          checkIn: mainLog.checkIn || "--:--",
+          checkOut: mainLog.checkOut || "--:--",
+          status: mainLog.status || "Clocked Out",
+          isAutoCheckout: dayHasAutoCheckout,
+          overrideOtHours: dayHasOverrideOt ? customOtHours : null,
+          regularizationStatus: mainLog.regularizationStatus || "None",
+          grossHours: parseFloat(dayGross.toFixed(2)),
+          lunchDeduction: parseFloat(lunchDeduction.toFixed(2)),
+          regularHours: parseFloat(regularHours.toFixed(2)),
+          overtimeHours: parseFloat(overtimeHours.toFixed(2)),
+          netHours: parseFloat((regularHours + overtimeHours).toFixed(2)),
+          pieceCount: mainLog.pieceCount || 0,
+          unitPrice: mainLog.unitPrice || null,
+        });
       }
     });
 
-    const totalNetHours = Math.max(0, parseFloat((totalGrossHours - totalLunchDeductions).toFixed(2)));
+    const totalNetHours = Math.max(0, parseFloat((totalRegularHours + totalOvertimeHours).toFixed(2)));
 
     const payType = emp.payType || "Monthly";
     const payRate = Number(emp.payRate) || 0;
@@ -1330,6 +1429,7 @@ export default function HRMSPortal({
       periodStart,
       periodEnd,
       totalPieces,
+      dailyBreakdown,
     };
   }, [attendance]);
 
@@ -2625,9 +2725,13 @@ export default function HRMSPortal({
                         return (
                           <div 
                             key={emp.id}
-                            className="border border-zinc-200 dark:border-zinc-800 p-3.5 space-y-3 flex flex-col justify-between hover:border-zinc-350 dark:hover:border-zinc-700 transition-colors"
+                            className="border border-zinc-200 dark:border-zinc-800 p-3.5 space-y-3 flex flex-col justify-between hover:border-amber-500/50 dark:hover:border-amber-500/50 transition-all group"
                           >
-                            <div className="flex justify-between items-start gap-2">
+                            <div 
+                              onClick={() => setDetailedStaffEmp(emp)}
+                              className="flex justify-between items-start gap-2 cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/40 p-1.5 rounded transition-colors"
+                              title="Click to view detailed date breakdown & edit OT/punches"
+                            >
                               <div className="flex items-center gap-2.5">
                                 {emp.profilePhoto ? (
                                   <img src={emp.profilePhoto} alt={emp.name} className="h-9 w-9 object-cover border border-zinc-200 dark:border-zinc-800" />
@@ -2637,7 +2741,10 @@ export default function HRMSPortal({
                                   </div>
                                 )}
                                 <div className="text-left">
-                                  <p className="font-bold text-zinc-900 dark:text-zinc-105 leading-none">{emp.name}</p>
+                                  <p className="font-bold text-zinc-900 dark:text-zinc-105 leading-none group-hover:text-amber-600 dark:group-hover:text-amber-400 flex items-center gap-1.5">
+                                    {emp.name}
+                                    <span className="text-[9px] text-amber-500 font-normal underline decoration-dotted">View Dates</span>
+                                  </p>
                                   <p className="text-[9px] text-zinc-405 font-mono mt-1.5 uppercase font-bold">{emp.code} · {emp.department}</p>
                                 </div>
                               </div>
@@ -2698,19 +2805,30 @@ export default function HRMSPortal({
                               </div>
                             )}
 
-                            <button
-                              type="button"
-                              onClick={() => setSelectedPayEmp(emp)}
-                              disabled={calc.pendingAmount <= 0}
-                              className={`w-full py-2 px-3 font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-2xs ${
-                                calc.pendingAmount > 0
-                                  ? "bg-amber-500 hover:bg-amber-600 text-black cursor-pointer active:scale-98"
-                                  : "bg-zinc-200 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
-                              }`}
-                            >
-                              <Banknote className="h-4 w-4" />
-                              {calc.pendingAmount > 0 ? `Process Payout (₹${calc.pendingAmount.toLocaleString('en-IN')})` : "Fully Paid (₹0.00)"}
-                            </button>
+                            <div className="flex gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={() => setDetailedStaffEmp(emp)}
+                                className="flex-1 py-1.5 px-2 text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 rounded flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                              >
+                                <Calendar className="h-3 w-3 text-amber-500" />
+                                <span>View & Edit Date Details</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setSelectedPayEmp(emp)}
+                                disabled={calc.pendingAmount <= 0}
+                                className={`flex-1 py-1.5 px-3 font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-2xs ${
+                                  calc.pendingAmount > 0
+                                    ? "bg-amber-500 hover:bg-amber-600 text-black cursor-pointer active:scale-98"
+                                    : "bg-zinc-200 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed"
+                                }`}
+                              >
+                                <Banknote className="h-3.5 w-3.5" />
+                                {calc.pendingAmount > 0 ? `Process Payout (₹${calc.pendingAmount.toLocaleString('en-IN')})` : "Fully Paid"}
+                              </button>
+                            </div>
                           </div>
                         );
                       })}
@@ -3063,6 +3181,307 @@ export default function HRMSPortal({
                         {isProcessingPayment ? "Processing..." : `Confirm & Pay ₹${calc.pendingAmount.toLocaleString('en-IN')}`}
                       </button>
                     </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Detailed Staff Payroll Breakdown & Date-Wise Edit Modal */}
+            {detailedStaffEmp && (() => {
+              const emp = detailedStaffEmp;
+              const calc = calculateEmpPayDetails(emp);
+
+              return (
+                <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 max-w-4xl w-full space-y-4 shadow-2xl text-left animate-in zoom-in-95 duration-150 my-8">
+                    
+                    {/* Modal Header */}
+                    <div className="flex justify-between items-center pb-3 border-b border-zinc-200 dark:border-zinc-800">
+                      <div className="flex items-center gap-3">
+                        {emp.profilePhoto ? (
+                          <img src={emp.profilePhoto} alt={emp.name} className="h-10 w-10 object-cover border border-zinc-200 dark:border-zinc-800 shrink-0" />
+                        ) : (
+                          <div className={`h-10 w-10 bg-gradient-to-br ${getAvatarBg(emp.name)} text-white flex items-center justify-center font-bold text-sm shrink-0`}>
+                            {getInitials(emp.name)}
+                          </div>
+                        )}
+                        <div>
+                          <h4 className="font-bold text-base text-zinc-900 dark:text-zinc-50 flex items-center gap-2">
+                            {emp.name}
+                            <span className="text-xs font-mono font-normal text-zinc-400">({emp.code})</span>
+                          </h4>
+                          <p className="text-[10px] text-zinc-400 font-mono uppercase font-bold">
+                            {emp.department} · {emp.designation} · {emp.payType} Pay (₹{emp.payRate})
+                          </p>
+                        </div>
+                      </div>
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          setDetailedStaffEmp(null);
+                          setEditingDateLogId(null);
+                        }}
+                        className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 text-base font-bold cursor-pointer px-2"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    {/* Summary Metric Cards */}
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 text-xs font-mono">
+                      <div className="bg-zinc-50 dark:bg-zinc-950 p-2.5 border border-zinc-200 dark:border-zinc-800 rounded">
+                        <span className="text-[9px] text-zinc-400 uppercase font-sans block">Worked Days</span>
+                        <span className="font-bold text-sm text-zinc-800 dark:text-zinc-200">{calc.workedDaysCount} Days</span>
+                      </div>
+                      <div className="bg-zinc-50 dark:bg-zinc-950 p-2.5 border border-zinc-200 dark:border-zinc-800 rounded">
+                        <span className="text-[9px] text-zinc-400 uppercase font-sans block">Gross Hours</span>
+                        <span className="font-bold text-sm text-zinc-800 dark:text-zinc-200">{formatHoursToHm(calc.totalGrossHours)}</span>
+                      </div>
+                      <div className="bg-zinc-50 dark:bg-zinc-950 p-2.5 border border-zinc-200 dark:border-zinc-800 rounded">
+                        <span className="text-[9px] text-zinc-400 uppercase font-sans block">Regular Hours</span>
+                        <span className="font-bold text-sm text-zinc-800 dark:text-zinc-200">{formatHoursToHm(calc.totalRegularHours)}</span>
+                      </div>
+                      <div className="bg-amber-500/10 p-2.5 border border-amber-500/20 rounded">
+                        <span className="text-[9px] text-amber-600 dark:text-amber-400 uppercase font-sans block">Total Overtime</span>
+                        <span className="font-black text-sm text-amber-600 dark:text-amber-400">+{formatHoursToHm(calc.totalOvertimeHours)}</span>
+                      </div>
+                      <div className="bg-emerald-500/10 p-2.5 border border-emerald-500/20 rounded col-span-2 sm:col-span-1">
+                        <span className="text-[9px] text-emerald-600 dark:text-emerald-400 uppercase font-sans block">Pending Pay</span>
+                        <span className="font-black text-sm text-emerald-600 dark:text-emerald-400">₹{calc.pendingAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    </div>
+
+                    {/* Informational Alert Notice */}
+                    <div className="bg-amber-500/10 border border-amber-500/20 p-2.5 text-[11px] text-amber-700 dark:text-amber-300 rounded flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
+                      <div>
+                        <p className="font-bold">Admin Date-Wise Overtime & Punch Editing:</p>
+                        <p className="text-[10px] opacity-90">
+                          Select any date below to edit forgotten checkouts, adjust OT hours directly, or update piece-rate pay parameters. Dates marked with <span className="font-bold text-amber-600 dark:text-amber-400">Auto Clocked Out</span> default OT to 0.00 until approved/edited by an admin.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Date Breakdown Table */}
+                    <div className="border border-zinc-200 dark:border-zinc-800 overflow-x-auto max-h-[380px] overflow-y-auto">
+                      <table className="w-full text-left text-xs font-mono border-collapse">
+                        <thead className="bg-zinc-100 dark:bg-zinc-950 text-[10px] text-zinc-500 uppercase sticky top-0 border-b border-zinc-200 dark:border-zinc-800">
+                          <tr>
+                            <th className="p-2.5 font-bold">Date</th>
+                            <th className="p-2.5 font-bold">Check-In</th>
+                            <th className="p-2.5 font-bold">Check-Out</th>
+                            <th className="p-2.5 font-bold">Status</th>
+                            <th className="p-2.5 font-bold text-right">Gross</th>
+                            <th className="p-2.5 font-bold text-right">Regular</th>
+                            <th className="p-2.5 font-bold text-right text-amber-600 dark:text-amber-400">Overtime</th>
+                            <th className="p-2.5 font-bold text-center">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800/60">
+                          {calc.dailyBreakdown.length === 0 ? (
+                            <tr>
+                              <td colSpan={8} className="p-6 text-center text-zinc-400 italic font-sans text-xs">
+                                No worked dates logged for this employee.
+                              </td>
+                            </tr>
+                          ) : (
+                            calc.dailyBreakdown.map((item: any) => {
+                              const isEditing = editingDateLogId === item.logId;
+
+                              return (
+                                <React.Fragment key={item.date + item.logId}>
+                                  <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors">
+                                    <td className="p-2.5 font-bold text-zinc-900 dark:text-zinc-100">{item.date}</td>
+                                    <td className="p-2.5 text-zinc-600 dark:text-zinc-400">{item.checkIn}</td>
+                                    <td className="p-2.5 text-zinc-600 dark:text-zinc-400 font-bold">{item.checkOut}</td>
+                                    <td className="p-2.5">
+                                      {item.isAutoCheckout ? (
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 rounded">
+                                          <Clock className="h-2.5 w-2.5" /> Auto Clocked Out (OT Capped)
+                                        </span>
+                                      ) : item.overrideOtHours !== null ? (
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 rounded">
+                                          Admin Overridden
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded">
+                                          Clocked Out
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="p-2.5 text-right text-zinc-700 dark:text-zinc-300">{formatHoursToHm(item.grossHours)}</td>
+                                    <td className="p-2.5 text-right text-zinc-700 dark:text-zinc-300">{formatHoursToHm(item.regularHours)}</td>
+                                    <td className="p-2.5 text-right font-bold text-amber-600 dark:text-amber-400">
+                                      +{formatHoursToHm(item.overtimeHours)}
+                                    </td>
+                                    <td className="p-2.5 text-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          if (isEditing) {
+                                            setEditingDateLogId(null);
+                                            setEditDateOtOverrideEnabled(false);
+                                          } else {
+                                            setEditingDateLogId(item.logId);
+                                            setEditDateCheckIn(item.checkIn !== "--:--" ? item.checkIn : "09:00 AM");
+                                            setEditDateCheckOut(item.checkOut !== "--:--" ? item.checkOut : "06:00 PM");
+                                            // Pre-fill OT only if there is an existing override; otherwise leave blank
+                                            setEditDateOtHours(item.overrideOtHours !== null ? String(item.overrideOtHours) : "");
+                                            setEditDateOtOverrideEnabled(item.overrideOtHours !== null);
+                                            setEditDatePieceCount(item.pieceCount !== undefined ? String(item.pieceCount) : "");
+                                            setEditDateUnitPrice(item.unitPrice !== null && item.unitPrice !== undefined ? String(item.unitPrice) : "");
+                                          }
+                                        }}
+                                        className="px-2 py-1 text-[10px] font-bold bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700 rounded cursor-pointer transition-colors"
+                                      >
+                                        {isEditing ? "Close" : "Edit Date Data"}
+                                      </button>
+                                    </td>
+                                  </tr>
+
+                                  {/* Inline Edit Form for Selected Date */}
+                                  {isEditing && (
+                                    <tr className="bg-amber-500/5 dark:bg-amber-500/10 border-y border-amber-500/20">
+                                      <td colSpan={8} className="p-3 font-sans">
+                                        <div className="space-y-3 max-w-2xl">
+                                          <p className="text-xs font-bold text-amber-700 dark:text-amber-300 flex items-center gap-1.5">
+                                            <Edit3 className="h-3.5 w-3.5" /> Edit Attendance & OT Details for {item.date}
+                                          </p>
+
+                                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs font-mono">
+                                            <div>
+                                              <label className="text-[9px] uppercase font-bold text-zinc-500 block mb-1">Check-In Time</label>
+                                              <input
+                                                type="time"
+                                                value={timeTo24h(editDateCheckIn)}
+                                                onChange={e => setEditDateCheckIn(timeTo12h(e.target.value))}
+                                                className="w-full h-9 bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 font-mono text-xs focus:outline-none focus:border-amber-500 cursor-pointer"
+                                              />
+                                            </div>
+                                            <div>
+                                              <label className="text-[9px] uppercase font-bold text-zinc-500 block mb-1">Check-Out Time</label>
+                                              <input
+                                                type="time"
+                                                value={timeTo24h(editDateCheckOut)}
+                                                onChange={e => setEditDateCheckOut(timeTo12h(e.target.value))}
+                                                className="w-full h-9 bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 font-mono text-xs focus:outline-none focus:border-amber-500 cursor-pointer"
+                                              />
+                                            </div>
+                                            <div className="col-span-1 sm:col-span-2 lg:col-span-2">
+                                              <label className="text-[9px] uppercase font-bold text-amber-600 dark:text-amber-400 block mb-1 flex items-center gap-2">
+                                                <input
+                                                  type="checkbox"
+                                                  checked={editDateOtOverrideEnabled}
+                                                  onChange={e => {
+                                                    setEditDateOtOverrideEnabled(e.target.checked);
+                                                    if (!e.target.checked) setEditDateOtHours("");
+                                                  }}
+                                                  className="w-3 h-3 accent-amber-500 cursor-pointer"
+                                                />
+                                                Manual OT Override (Hours)
+                                              </label>
+                                              {editDateOtOverrideEnabled ? (
+                                                <input
+                                                  type="number"
+                                                  step="0.1"
+                                                  min="0"
+                                                  placeholder="E.g., 1.5 or 0"
+                                                  value={editDateOtHours}
+                                                  onChange={e => setEditDateOtHours(e.target.value)}
+                                                  className="w-full h-9 bg-white dark:bg-zinc-950 border-2 border-amber-400 px-2 font-mono text-xs font-bold text-amber-600 dark:text-amber-400 focus:outline-none focus:border-amber-500"
+                                                />
+                                              ) : (
+                                                <div className="h-9 flex items-center px-2 bg-zinc-50 dark:bg-zinc-900 border border-dashed border-zinc-300 dark:border-zinc-700 text-[10px] text-zinc-400 italic font-mono">
+                                                  Auto-calculated from times above
+                                                </div>
+                                              )}
+                                            </div>
+                                            {emp.payType === "Per Unit" && (
+                                              <>
+                                                <div>
+                                                  <label className="text-[9px] uppercase font-bold text-zinc-500 block mb-1">Piece Count</label>
+                                                  <input
+                                                    type="number"
+                                                    min="0"
+                                                    placeholder="0"
+                                                    value={editDatePieceCount}
+                                                    onChange={e => setEditDatePieceCount(e.target.value)}
+                                                    className="w-full h-8 bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 font-mono text-xs focus:outline-none focus:border-amber-500"
+                                                  />
+                                                </div>
+                                                <div>
+                                                  <label className="text-[9px] uppercase font-bold text-zinc-500 block mb-1">Unit Rate (₹)</label>
+                                                  <input
+                                                    type="number"
+                                                    step="0.5"
+                                                    min="0"
+                                                    placeholder={`Default ₹${emp.payRate}`}
+                                                    value={editDateUnitPrice}
+                                                    onChange={e => setEditDateUnitPrice(e.target.value)}
+                                                    className="w-full h-8 bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 font-mono text-xs focus:outline-none focus:border-amber-500"
+                                                  />
+                                                </div>
+                                              </>
+                                            )}
+                                          </div>
+
+                                          <div className="flex gap-2 justify-end pt-1">
+                                            <button
+                                              type="button"
+                                              onClick={() => setEditingDateLogId(null)}
+                                              className="px-3 py-1.5 text-xs font-bold text-zinc-500 border border-zinc-300 dark:border-zinc-700 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+                                            >
+                                              Cancel
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleSaveDateEdit(item)}
+                                              disabled={isSavingDateEdit}
+                                              className="px-4 py-1.5 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-black rounded flex items-center gap-1.5 cursor-pointer shadow-xs"
+                                            >
+                                              {isSavingDateEdit && <RotateCcw className="h-3 w-3 animate-spin" />}
+                                              <span>Save Date Changes</span>
+                                            </button>
+                                          </div>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </React.Fragment>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Modal Footer */}
+                    <div className="flex justify-between items-center pt-3 border-t border-zinc-200 dark:border-zinc-800">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDetailedStaffEmp(null);
+                          setEditingDateLogId(null);
+                        }}
+                        className="px-4 py-2 text-xs font-bold uppercase border border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+                      >
+                        Close Details
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedPayEmp(emp);
+                          setDetailedStaffEmp(null);
+                        }}
+                        disabled={calc.pendingAmount <= 0}
+                        className="px-5 py-2 text-xs font-bold uppercase bg-amber-500 hover:bg-amber-600 text-black flex items-center gap-1.5 cursor-pointer shadow-sm"
+                      >
+                        <Banknote className="h-4 w-4" />
+                        <span>Process Payout (₹{calc.pendingAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })})</span>
+                      </button>
+                    </div>
+
                   </div>
                 </div>
               );
@@ -4153,19 +4572,18 @@ export default function HRMSPortal({
                                         <label className="text-[8px] uppercase font-bold text-zinc-400 block">Check In Time</label>
                                         <input
                                           type="time"
-                                          value={editPunchIn}
-                                          onChange={e => setEditPunchIn(e.target.value)}
-                                          className="w-full h-7 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded px-1.5 text-[10px] font-mono font-bold text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-amber-500"
+                                          value={timeTo24h(editPunchIn)}
+                                          onChange={e => setEditPunchIn(timeTo12h(e.target.value))}
+                                          className="w-full h-7 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded px-1.5 text-[10px] font-mono font-bold text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-amber-500 cursor-pointer"
                                         />
                                       </div>
                                       <div>
                                         <label className="text-[8px] uppercase font-bold text-zinc-400 block">Check Out Time</label>
                                         <input
-                                          type="text"
-                                          placeholder="06:00 PM"
-                                          value={editPunchOut}
-                                          onChange={e => setEditPunchOut(e.target.value)}
-                                          className="w-full h-7 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded px-1.5 text-[10px] font-mono font-bold text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-amber-500"
+                                          type="time"
+                                          value={timeTo24h(editPunchOut)}
+                                          onChange={e => setEditPunchOut(timeTo12h(e.target.value))}
+                                          className="w-full h-7 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded px-1.5 text-[10px] font-mono font-bold text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-amber-500 cursor-pointer"
                                         />
                                       </div>
                                     </div>

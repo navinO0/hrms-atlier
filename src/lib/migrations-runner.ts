@@ -9,6 +9,7 @@ import * as createEmploymentTypes from "../migrations/06_create_employment_types
 import * as createDepartmentsAndPayStructures from "../migrations/07_create_departments_and_pay_structures";
 import * as addPieceCountToAttendance from "../migrations/08_add_piece_count_to_attendance";
 import * as addUnitPriceToAttendance from "../migrations/09_add_unit_price_to_attendance";
+import * as addAutoCheckoutAndOtOverrideToAttendance from "../migrations/10_add_auto_checkout_and_ot_override_to_attendance";
 
 interface Migration {
   name: string;
@@ -66,6 +67,11 @@ const MIGRATIONS: Migration[] = [
     name: "09_add_unit_price_to_attendance.ts",
     up: addUnitPriceToAttendance.up,
     down: addUnitPriceToAttendance.down
+  },
+  {
+    name: "10_add_auto_checkout_and_ot_override_to_attendance.ts",
+    up: addAutoCheckoutAndOtOverrideToAttendance.up,
+    down: addAutoCheckoutAndOtOverrideToAttendance.down
   }
 ];
 

@@ -1184,7 +1184,8 @@ export async function adminEditPunchAction(
   checkIn: string | null | undefined,
   checkOut: string | null | undefined,
   pieceCount?: number | null,
-  unitPrice?: number | null
+  unitPrice?: number | null,
+  overrideOtHours?: number | null
 ) {
   try {
     await initDb();
@@ -1194,7 +1195,7 @@ export async function adminEditPunchAction(
     }
 
     try {
-      AdminEditPunchSchema.parse({ logId, checkIn, checkOut, pieceCount, unitPrice });
+      AdminEditPunchSchema.parse({ logId, checkIn, checkOut, pieceCount, unitPrice, overrideOtHours });
     } catch (err: any) {
       return { success: false, error: formatZodError(err) };
     }
@@ -1207,7 +1208,10 @@ export async function adminEditPunchAction(
     const employeeId = log.get("employeeId") as string;
     const date = log.get("date") as string;
 
-    const updateFields: any = {};
+    const updateFields: any = {
+      isAutoCheckout: false,
+      regularizationStatus: "Approved"
+    };
     if (checkIn !== undefined) updateFields.checkIn = checkIn || null;
     if (checkOut !== undefined) updateFields.checkOut = checkOut || null;
     if (pieceCount !== undefined) {
@@ -1215,6 +1219,9 @@ export async function adminEditPunchAction(
     }
     if (unitPrice !== undefined) {
       updateFields.unitPrice = (unitPrice !== null && !isNaN(Number(unitPrice))) ? Number(unitPrice) : null;
+    }
+    if (overrideOtHours !== undefined) {
+      updateFields.overrideOtHours = (overrideOtHours !== null && !isNaN(Number(overrideOtHours))) ? Number(overrideOtHours) : null;
     }
 
     const newCheckOut = checkOut !== undefined ? checkOut : (log.get("checkOut") as string | undefined);
